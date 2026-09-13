@@ -2,13 +2,34 @@ import 'package:flutter/material.dart';
 import '../core/security/pin_repository.dart';
 import 'security_service.dart';
 
+/// Estado de bloqueio do aplicativo.
+///
+/// O bloqueio é considerado ativo quando o PIN está habilitado **ou** quando
+/// a biometria está disponível no aparelho. Isso garante que usuários que
+/// habilitaram apenas a biometria também tenham o app protegido.
 class AppLockService {
   AppLockService._();
   static final instance = AppLockService._();
 
+  Future<bool> isPinEnabled() async {
+    try {
+      return await PinRepository.instance.isEnabled();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> isBiometricsAvailable() async {
+    try {
+      return await SecurityService.instance.canUseBiometrics();
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> isLockEnabled() async {
-    return await PinRepository.instance.isEnabled() ||
-        await SecurityService.instance.canUseBiometrics();
+    if (await isPinEnabled()) return true;
+    return isBiometricsAvailable();
   }
 
   Future<bool> unlockWithPin(String pin) async {
@@ -32,6 +53,9 @@ class _AppLockGateState extends State<AppLockGate>
     with WidgetsBindingObserver {
   bool _checking = true;
   bool _locked = false;
+  bool _pinEnabled = false;
+  bool _biometricsAvailable = false;
+  bool _unlocking = false;
   final _pin = TextEditingController();
 
   @override
@@ -42,15 +66,14 @@ class _AppLockGateState extends State<AppLockGate>
   }
 
   Future<void> _load() async {
-    bool pinEnabled = false;
-    try {
-      pinEnabled = await PinRepository.instance.isEnabled();
-    } catch (_) {
-      // Falhas na leitura do PIN não devem bloquear a inicialização.
-    }
+    final pinEnabled = await AppLockService.instance.isPinEnabled();
+    final biometrics = await AppLockService.instance.isBiometricsAvailable();
+
     if (mounted) {
       setState(() {
-        _locked = pinEnabled;
+        _pinEnabled = pinEnabled;
+        _biometricsAvailable = biometrics;
+        _locked = pinEnabled || biometrics;
         _checking = false;
       });
     }
@@ -65,26 +88,42 @@ class _AppLockGateState extends State<AppLockGate>
   }
 
   Future<void> _relock() async {
-    bool pinEnabled = false;
-    try {
-      pinEnabled = await PinRepository.instance.isEnabled();
-    } catch (_) {
-      return;
-    }
-    if (mounted && pinEnabled) setState(() => _locked = true);
+    // Evita re-bloquear enquanto uma autenticação está em andamento,
+    // prevenindo loops de bloqueio durante o diálogo biométrico.
+    if (_unlocking) return;
+
+    final enabled = await AppLockService.instance.isLockEnabled();
+    if (mounted && enabled) setState(() => _locked = true);
   }
 
   Future<void> _unlockPin() async {
-    final ok = await AppLockService.instance.unlockWithPin(_pin.text);
-    if (mounted && ok) {
-      _pin.clear();
-      setState(() => _locked = false);
+    if (_unlocking) return;
+    setState(() => _unlocking = true);
+    try {
+      final ok = await AppLockService.instance.unlockWithPin(_pin.text);
+      if (!mounted) return;
+      if (ok) {
+        _pin.clear();
+        setState(() => _locked = false);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('PIN incorreto.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _unlocking = false);
     }
   }
 
   Future<void> _unlockBiometric() async {
-    final ok = await AppLockService.instance.unlockWithBiometrics();
-    if (mounted && ok) setState(() => _locked = false);
+    if (_unlocking) return;
+    setState(() => _unlocking = true);
+    try {
+      final ok = await AppLockService.instance.unlockWithBiometrics();
+      if (mounted && ok) setState(() => _locked = false);
+    } finally {
+      if (mounted) setState(() => _unlocking = false);
+    }
   }
 
   @override
@@ -116,33 +155,41 @@ class _AppLockGateState extends State<AppLockGate>
                   const Text('Xarleta Finanças',
                     style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
-                  const Text('Digite seu PIN para continuar'),
+                  Text(
+                    _pinEnabled
+                        ? 'Digite seu PIN para continuar'
+                        : 'Confirme sua identidade para continuar',
+                  ),
                   const SizedBox(height: 20),
-                  TextField(
-                    controller: _pin,
-                    keyboardType: TextInputType.number,
-                    obscureText: true,
-                    maxLength: 8,
-                    autofocus: true,
-                    onSubmitted: (_) => _unlockPin(),
-                    decoration: const InputDecoration(
-                      labelText: 'PIN',
-                      border: OutlineInputBorder(),
+                  if (_pinEnabled) ...[
+                    TextField(
+                      controller: _pin,
+                      keyboardType: TextInputType.number,
+                      obscureText: true,
+                      maxLength: 8,
+                      autofocus: true,
+                      onSubmitted: (_) => _unlockPin(),
+                      decoration: const InputDecoration(
+                        labelText: 'PIN',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
-                  ),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: _unlockPin,
-                      child: const Text('DESBLOQUEAR'),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: _unlocking ? null : _unlockPin,
+                        child: const Text('DESBLOQUEAR'),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton.icon(
-                    onPressed: _unlockBiometric,
-                    icon: const Icon(Icons.fingerprint),
-                    label: const Text('USAR BIOMETRIA'),
-                  ),
+                  ],
+                  if (_biometricsAvailable) ...[
+                    const SizedBox(height: 8),
+                    TextButton.icon(
+                      onPressed: _unlocking ? null : _unlockBiometric,
+                      icon: const Icon(Icons.fingerprint),
+                      label: const Text('USAR BIOMETRIA'),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -152,4 +199,3 @@ class _AppLockGateState extends State<AppLockGate>
     );
   }
 }
-
