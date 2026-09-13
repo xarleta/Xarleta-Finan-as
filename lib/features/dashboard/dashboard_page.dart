@@ -10,16 +10,55 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
+  late Future<Map<String, double>> _summaryFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _summaryFuture = TransactionRepository.instance.summary();
+  }
+
+  Future<void> _reload() async {
+    final future = TransactionRepository.instance.summary();
+    setState(() {
+      _summaryFuture = future;
+    });
+    await future;
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<Map<String, double>>(
-      future: TransactionRepository.instance.summary(),
+      future: _summaryFuture,
       builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline, size: 48),
+                  const SizedBox(height: 12),
+                  const Text('Não foi possível carregar o resumo financeiro.'),
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    onPressed: _reload,
+                    child: const Text('Tentar novamente'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
         final income = snapshot.data?['income'] ?? 0;
         final expense = snapshot.data?['expense'] ?? 0;
         final balance = income - expense;
         return RefreshIndicator(
-          onRefresh: () async => setState(() {}),
+          onRefresh: _reload,
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
