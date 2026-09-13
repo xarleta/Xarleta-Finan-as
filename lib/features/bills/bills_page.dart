@@ -15,15 +15,20 @@ class BillsPage extends StatefulWidget {
 
 class _BillsPageState extends State<BillsPage> {
   late Future<List<Bill>> _billsFuture;
+  late Future<Map<String, int>> _countsFuture;
 
   @override
   void initState() {
     super.initState();
     _billsFuture = BillRepository.instance.list();
+    _countsFuture = BillRepository.instance.counts();
   }
 
   Future<void> _refresh() async {
-    setState(() => _billsFuture = BillRepository.instance.list());
+    setState(() {
+      _billsFuture = BillRepository.instance.list();
+      _countsFuture = BillRepository.instance.counts();
+    });
     await _billsFuture;
   }
 
@@ -66,7 +71,7 @@ class _BillsPageState extends State<BillsPage> {
               padding: const EdgeInsets.all(16),
               children: [
                 FutureBuilder<Map<String, int>>(
-                  future: BillRepository.instance.counts(),
+                  future: _countsFuture,
                   builder: (_, countSnapshot) {
                     final counts = countSnapshot.data ?? {};
 
