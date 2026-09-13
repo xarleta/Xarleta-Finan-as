@@ -18,7 +18,9 @@ class _DataManagementPageState extends State<DataManagementPage> {
     setState(() => _busy = true);
     try {
       final json = await BackupService.instance.createJson();
-      await Share.share(json, subject: 'Backup Xarleta Finanças');
+      await SharePlus.instance.share(
+        ShareParams(text: json, subject: 'Backup Xarleta Finanças'),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -28,7 +30,9 @@ class _DataManagementPageState extends State<DataManagementPage> {
     setState(() => _busy = true);
     try {
       final csv = await ExportService.instance.transactionsCsv();
-      await Share.share(csv, subject: 'Exportação Xarleta Finanças CSV');
+      await SharePlus.instance.share(
+        ShareParams(text: csv, subject: 'Exportação Xarleta Finanças CSV'),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }

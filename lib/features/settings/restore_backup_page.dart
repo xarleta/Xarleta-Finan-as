@@ -16,20 +16,23 @@ class _RestoreBackupPageState extends State<RestoreBackupPage> {
   String? _content;
 
   Future<void> _selectFile() async {
-    final result = await FilePicker.platform.pickFiles(
+    final files = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['json'],
-      withData: false,
     );
 
-    if (result == null || result.files.single.path == null) return;
+    if (files.isEmpty) return;
 
-    final file = File(result.files.single.path!);
+    final selected = files.first;
+    final path = selected.path;
+    if (path == null) return;
+
+    final file = File(path);
     final content = await file.readAsString();
 
     if (!mounted) return;
     setState(() {
-      _selectedName = result.files.single.name;
+      _selectedName = selected.name;
       _content = content;
     });
   }
