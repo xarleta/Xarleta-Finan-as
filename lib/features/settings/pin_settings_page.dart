@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/security/pin_repository.dart';
+import '../../services/app_lock_service.dart';
 
 class PinSettingsPage extends StatefulWidget {
   const PinSettingsPage({super.key});
@@ -22,7 +23,8 @@ class _PinSettingsPageState extends State<PinSettingsPage> {
   Future<void> _load() async {
     try {
       _enabled = await PinRepository.instance.isEnabled();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[PinSettingsPage] _load falhou: $e');
       _enabled = false;
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -41,6 +43,40 @@ class _PinSettingsPageState extends State<PinSettingsPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.toString())),
+      );
+    }
+  }
+
+  /// Desativa o PIN.
+  ///
+  /// Se a biometria também não estiver habilitada/utilizável, o app deixaria
+  /// de ter qualquer forma de desbloqueio — o que é aceitável (o usuário
+  /// optou por remover a proteção), mas avisamos para evitar surpresa.
+  Future<void> _disable() async {
+    try {
+      await PinRepository.instance.disable();
+      if (!mounted) return;
+      setState(() => _enabled = false);
+
+      final biometricsUsable =
+          await AppLockService.instance.isBiometricsEnabled() &&
+              await AppLockService.instance.isBiometricsAvailable();
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            biometricsUsable
+                ? 'PIN desativado. A biometria continua ativa.'
+                : 'PIN desativado. O app não está mais protegido.',
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('[PinSettingsPage] _disable falhou: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível desativar o PIN.')),
       );
     }
   }
@@ -81,10 +117,7 @@ class _PinSettingsPageState extends State<PinSettingsPage> {
               ),
               if (_enabled)
                 OutlinedButton(
-                  onPressed: () async {
-                    await PinRepository.instance.disable();
-                    if (mounted) setState(() => _enabled = false);
-                  },
+                  onPressed: _disable,
                   child: const Text('DESATIVAR'),
                 ),
             ],

@@ -1,34 +1,83 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../core/security/pin_repository.dart';
 import 'security_service.dart';
 
 /// Estado de bloqueio do aplicativo.
 ///
-/// O bloqueio é considerado ativo quando o PIN está habilitado **ou** quando
-/// a biometria está disponível no aparelho. Isso garante que usuários que
-/// habilitaram apenas a biometria também tenham o app protegido.
+/// O bloqueio só é considerado ativo quando o **usuário** configurou
+/// explicitamente uma forma de proteção:
+/// - PIN habilitado; ou
+/// - biometria habilitada pelo usuário (flag persistida).
+///
+/// A mera disponibilidade de biometria no aparelho **não** bloqueia o app.
+/// Isso evita que a primeira execução em um aparelho com biometria cadastrada
+/// prenda o usuário em uma tela de bloqueio sem nenhuma forma de desbloqueio.
 class AppLockService {
   AppLockService._();
   static final instance = AppLockService._();
 
+  /// Flag persistida que indica que o usuário habilitou a biometria.
+  static const _biometricsEnabledKey = 'security_biometrics_enabled';
+
   Future<bool> isPinEnabled() async {
     try {
       return await PinRepository.instance.isEnabled();
-    } catch (_) {
+    } catch (e) {
+      _log('isPinEnabled falhou: $e');
       return false;
     }
   }
 
+  /// Indica se a biometria está disponível **e utilizável** no aparelho.
   Future<bool> isBiometricsAvailable() async {
     try {
       return await SecurityService.instance.canUseBiometrics();
-    } catch (_) {
+    } catch (e) {
+      _log('isBiometricsAvailable falhou: $e');
       return false;
     }
   }
 
+  /// Indica se o usuário habilitou a biometria nas configurações.
+  Future<bool> isBiometricsEnabled() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(_biometricsEnabledKey) ?? false;
+    } catch (e) {
+      _log('isBiometricsEnabled falhou: $e');
+      return false;
+    }
+  }
+
+  /// Persiste a preferência do usuário sobre a biometria.
+  ///
+  /// Só deve ser chamado **após** validar que a biometria está disponível e
+  /// que uma autenticação real foi concluída com sucesso.
+  Future<void> setBiometricsEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_biometricsEnabledKey, enabled);
+  }
+
+  /// Indica se o bloqueio deve estar ativo.
+  ///
+  /// Considera apenas configurações feitas pelo usuário. Se a biometria foi
+  /// habilitada mas deixou de estar disponível (biometrias removidas do
+  /// aparelho), ela não conta como proteção válida — evitando estado morto.
   Future<bool> isLockEnabled() async {
     if (await isPinEnabled()) return true;
+    if (!await isBiometricsEnabled()) return false;
+    return isBiometricsAvailable();
+  }
+
+  /// Indica se existe alguma forma de desbloqueio utilizável.
+  ///
+  /// Usado para impedir que o app entre em um estado sem saída.
+  Future<bool> hasUsableUnlockMethod() async {
+    if (await isPinEnabled()) return true;
+    if (!await isBiometricsEnabled()) return false;
     return isBiometricsAvailable();
   }
 
@@ -36,8 +85,14 @@ class AppLockService {
     return PinRepository.instance.verify(pin);
   }
 
-  Future<bool> unlockWithBiometrics() async {
-    return SecurityService.instance.authenticate();
+  Future<BiometricResult> unlockWithBiometrics() async {
+    return SecurityService.instance.authenticateDetailed();
+  }
+
+  void _log(String message) {
+    if (kDebugMode) {
+      debugPrint('[AppLockService] $message');
+    }
   }
 }
 
@@ -54,6 +109,7 @@ class _AppLockGateState extends State<AppLockGate>
   bool _checking = true;
   bool _locked = false;
   bool _pinEnabled = false;
+  bool _biometricsEnabled = false;
   bool _biometricsAvailable = false;
   bool _unlocking = false;
   final _pin = TextEditingController();
@@ -67,13 +123,23 @@ class _AppLockGateState extends State<AppLockGate>
 
   Future<void> _load() async {
     final pinEnabled = await AppLockService.instance.isPinEnabled();
-    final biometrics = await AppLockService.instance.isBiometricsAvailable();
+    final biometricsEnabled =
+        await AppLockService.instance.isBiometricsEnabled();
+    final biometricsAvailable =
+        await AppLockService.instance.isBiometricsAvailable();
+
+    // Só bloqueia se houver uma forma de desbloqueio realmente utilizável.
+    // Se a biometria foi habilitada mas não está mais disponível e não há PIN,
+    // o app abre normalmente em vez de prender o usuário.
+    final hasUsableUnlock =
+        pinEnabled || (biometricsEnabled && biometricsAvailable);
 
     if (mounted) {
       setState(() {
         _pinEnabled = pinEnabled;
-        _biometricsAvailable = biometrics;
-        _locked = pinEnabled || biometrics;
+        _biometricsEnabled = biometricsEnabled;
+        _biometricsAvailable = biometricsAvailable;
+        _locked = hasUsableUnlock;
         _checking = false;
       });
     }
@@ -106,10 +172,11 @@ class _AppLockGateState extends State<AppLockGate>
         _pin.clear();
         setState(() => _locked = false);
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('PIN incorreto.')),
-        );
+        _showMessage('PIN incorreto.');
       }
+    } catch (e) {
+      if (mounted) _showMessage('Não foi possível validar o PIN.');
+      debugPrint('[AppLockGate] _unlockPin erro: $e');
     } finally {
       if (mounted) setState(() => _unlocking = false);
     }
@@ -119,11 +186,38 @@ class _AppLockGateState extends State<AppLockGate>
     if (_unlocking) return;
     setState(() => _unlocking = true);
     try {
-      final ok = await AppLockService.instance.unlockWithBiometrics();
-      if (mounted && ok) setState(() => _locked = false);
+      final result = await AppLockService.instance.unlockWithBiometrics();
+      if (!mounted) return;
+
+      switch (result) {
+        case BiometricResult.success:
+          setState(() => _locked = false);
+          break;
+        case BiometricResult.failed:
+          _showMessage('Autenticação não concluída. Tente novamente.');
+          break;
+        case BiometricResult.unavailable:
+          _showMessage(
+            'Biometria indisponível neste aparelho. Use o PIN para continuar.',
+          );
+          setState(() => _biometricsAvailable = false);
+          break;
+        case BiometricResult.error:
+          _showMessage('Não foi possível usar a biometria. Tente novamente.');
+          break;
+      }
+    } catch (e) {
+      if (mounted) _showMessage('Não foi possível usar a biometria.');
+      debugPrint('[AppLockGate] _unlockBiometric erro: $e');
     } finally {
       if (mounted) setState(() => _unlocking = false);
     }
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   @override
@@ -139,6 +233,8 @@ class _AppLockGateState extends State<AppLockGate>
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (!_locked) return widget.child;
+
+    final showBiometrics = _biometricsEnabled && _biometricsAvailable;
 
     return Scaffold(
       body: SafeArea(
@@ -182,7 +278,7 @@ class _AppLockGateState extends State<AppLockGate>
                       ),
                     ),
                   ],
-                  if (_biometricsAvailable) ...[
+                  if (showBiometrics) ...[
                     const SizedBox(height: 8),
                     TextButton.icon(
                       onPressed: _unlocking ? null : _unlockBiometric,
