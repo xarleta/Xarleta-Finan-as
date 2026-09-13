@@ -1,11 +1,8 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:path/path.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:xarleta_financas/core/database/app_database.dart';
 import 'package:xarleta_financas/features/work/work_page.dart';
+
+import 'helpers/test_database.dart';
 
 /// Testes de ciclo de vida da tela de Trabalho e entregas.
 ///
@@ -13,32 +10,14 @@ import 'package:xarleta_financas/features/work/work_page.dart';
 /// de `mounted`: se a tela for descartada enquanto o formulário está aberto,
 /// o retorno não pode lançar exceção.
 ///
-/// Cada arquivo de teste usa um diretório próprio para evitar contenção entre
-/// os isolates executados em paralelo pelo `flutter test`.
+/// O banco é preparado pelo helper compartilhado [TestDatabase], que usa um
+/// diretório temporário exclusivo por arquivo e limpa o singleton ao final,
+/// evitando vazamento de estado entre os isolates paralelos do `flutter test`.
 void main() {
-  late String databasePath;
+  final db = TestDatabase('work_lifecycle');
 
-  setUpAll(() async {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
-
-    final dir = join(
-      Directory.systemTemp.path,
-      'xarleta_test_work_lifecycle',
-    );
-    await databaseFactory.setDatabasesPath(dir);
-    databasePath = join(dir, 'xarleta_financas.db');
-    await deleteDatabase(databasePath);
-    await Directory(dir).create(recursive: true);
-
-    await AppDatabase.instance.database;
-  });
-
-  tearDownAll(() async {
-    final db = await AppDatabase.instance.database;
-    await db.close();
-    await deleteDatabase(databasePath);
-  });
+  setUpAll(db.setUpAll);
+  tearDownAll(db.tearDownAll);
 
   testWidgets(
     'descartar a tela de Trabalho durante o formulário não lança exceção',

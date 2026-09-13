@@ -1,25 +1,23 @@
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
-import 'package:path/path.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:xarleta_financas/core/database/app_database.dart';
 
-void main() {
-  test('migra uma base legada para a versao 9 sem apagar transacoes', () async {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
+import 'helpers/test_database.dart';
 
-    // Diretório próprio para não colidir com outros testes de banco
-    // executados em paralelo pelo `flutter test`.
-    final dir = join(
-      Directory.systemTemp.path,
-      'xarleta_test_migration',
-    );
-    await databaseFactory.setDatabasesPath(dir);
-    final databasePath = join(dir, 'xarleta_financas.db');
-    await deleteDatabase(databasePath);
-    await Directory(dir).create(recursive: true);
+void main() {
+  final testDb = TestDatabase('migration');
+
+  // Não abre a base no setUpAll: este teste precisa criar um banco legado
+  // (versão 2) antes que o `AppDatabase` abra o arquivo, para validar a
+  // migração até a versão 9.
+  setUpAll(() => testDb.setUpAll(openDatabase: false));
+  tearDownAll(testDb.tearDownAll);
+
+  test('migra uma base legada para a versao 9 sem apagar transacoes', () async {
+    // O helper já inicializou a fábrica FFI e definiu um diretório temporário
+    // exclusivo para este arquivo. Cria-se aqui uma base legada (versão 2)
+    // no mesmo caminho para validar a migração até a versão 9.
+    final databasePath = testDb.databasePath;
 
     final legacy = await openDatabase(
       databasePath,
@@ -76,7 +74,8 @@ void main() {
       await upgraded.query(table);
     }
 
-    await upgraded.close();
-    await deleteDatabase(databasePath);
+    // Fecha o handle e limpa o singleton; a remoção do arquivo temporário é
+    // responsabilidade do `tearDownAll` do helper.
+    await AppDatabase.instance.closeForTesting();
   });
 }

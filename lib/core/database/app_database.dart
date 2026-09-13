@@ -19,6 +19,20 @@ class AppDatabase {
     return _database!;
   }
 
+  /// Fecha o handle aberto e limpa o singleton.
+  ///
+  /// Existe exclusivamente para uso em testes: como [instance] é um singleton
+  /// de processo, sem este método o handle permaneceria aberto entre arquivos
+  /// de teste executados no mesmo isolate, vazando estado e impedindo a
+  /// remoção do arquivo temporário. Não deve ser chamado em produção.
+  Future<void> closeForTesting() async {
+    final db = _database;
+    _database = null;
+    if (db != null && db.isOpen) {
+      await db.close();
+    }
+  }
+
   Future<void> _upgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 3) {
       await db.execute('CREATE TABLE IF NOT EXISTS installments (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,total_amount REAL NOT NULL,installment_amount REAL NOT NULL,total_installments INTEGER NOT NULL,paid_installments INTEGER NOT NULL DEFAULT 0,first_due_date TEXT NOT NULL,category TEXT NOT NULL,status TEXT NOT NULL DEFAULT "active",reminder_days INTEGER NOT NULL DEFAULT 1,notes TEXT)');

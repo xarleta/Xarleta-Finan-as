@@ -1,55 +1,26 @@
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
-import 'package:path/path.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:xarleta_financas/core/database/app_database.dart';
 import 'package:xarleta_financas/features/bills/data/bill_repository.dart';
 import 'package:xarleta_financas/features/bills/domain/bill_model.dart';
 import 'package:xarleta_financas/features/installments/data/installment_repository.dart';
 import 'package:xarleta_financas/features/installments/domain/installment_model.dart';
 
+import 'helpers/test_database.dart';
+
 /// Testes críticos de pagamento: garantem que a validação de estado é feita
 /// no banco (dentro da transação) e que pagamentos duplicados não geram
 /// transações duplicadas, mesmo quando a UI é contornada.
 ///
-/// `AppDatabase` é um singleton que mantém o handle aberto; por isso a base é
-/// criada uma única vez (`setUpAll`) e as tabelas são limpas entre os testes.
-///
-/// Cada arquivo de teste usa um diretório próprio para evitar contenção entre
-/// os isolates executados em paralelo pelo `flutter test`.
+/// O banco é preparado pelo helper compartilhado [TestDatabase], que usa um
+/// diretório temporário exclusivo por arquivo e limpa o singleton ao final,
+/// evitando vazamento de estado entre os isolates paralelos do `flutter test`.
 void main() {
-  late String databasePath;
+  final testDb = TestDatabase('payments');
 
-  setUpAll(() async {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
+  setUpAll(testDb.setUpAll);
+  tearDownAll(testDb.tearDownAll);
 
-    final dir = join(
-      Directory.systemTemp.path,
-      'xarleta_test_payments',
-    );
-    await databaseFactory.setDatabasesPath(dir);
-    databasePath = join(dir, 'xarleta_financas.db');
-    await deleteDatabase(databasePath);
-    await Directory(dir).create(recursive: true);
-
-    // Abre (e mantém) a base usada por todos os testes.
-    await AppDatabase.instance.database;
-  });
-
-  tearDownAll(() async {
-    final db = await AppDatabase.instance.database;
-    await db.close();
-    await deleteDatabase(databasePath);
-  });
-
-  setUp(() async {
-    final db = await AppDatabase.instance.database;
-    await db.delete('transactions');
-    await db.delete('bills');
-    await db.delete('installments');
-  });
+  setUp(() => testDb.clearTables(['transactions', 'bills', 'installments']));
 
   group('BillRepository.markPaid', () {
     test('paga uma conta uma única vez e cria apenas uma transação', () async {

@@ -1,10 +1,9 @@
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
-import 'package:path/path.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:sqflite/sqflite.dart';
 import 'package:xarleta_financas/core/database/app_database.dart';
 import 'package:xarleta_financas/features/dashboard/data/dashboard_preferences_repository.dart';
+
+import 'helpers/test_database.dart';
 
 /// Testes da personalização do dashboard.
 ///
@@ -12,37 +11,16 @@ import 'package:xarleta_financas/features/dashboard/data/dashboard_preferences_r
 /// na tabela `app_settings`, sobrevive a uma nova leitura (simulando fechar e
 /// reabrir o app) e que a restauração do padrão funciona.
 ///
-/// Cada arquivo de teste usa um diretório próprio para evitar contenção entre
-/// os isolates executados em paralelo pelo `flutter test`.
+/// O banco é preparado pelo helper compartilhado [TestDatabase], que usa um
+/// diretório temporário exclusivo por arquivo e limpa o singleton ao final,
+/// evitando vazamento de estado entre os isolates paralelos do `flutter test`.
 void main() {
-  late String databasePath;
+  final testDb = TestDatabase('dashboard_prefs');
 
-  setUpAll(() async {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
+  setUpAll(testDb.setUpAll);
+  tearDownAll(testDb.tearDownAll);
 
-    final dir = join(
-      Directory.systemTemp.path,
-      'xarleta_test_dashboard_prefs',
-    );
-    await databaseFactory.setDatabasesPath(dir);
-    databasePath = join(dir, 'xarleta_financas.db');
-    await deleteDatabase(databasePath);
-    await Directory(dir).create(recursive: true);
-
-    await AppDatabase.instance.database;
-  });
-
-  tearDownAll(() async {
-    final db = await AppDatabase.instance.database;
-    await db.close();
-    await deleteDatabase(databasePath);
-  });
-
-  setUp(() async {
-    final db = await AppDatabase.instance.database;
-    await db.delete('app_settings');
-  });
+  setUp(() => testDb.clearTables(['app_settings']));
 
   test('sem configuração salva retorna o padrão com todos visíveis', () async {
     final prefs = await DashboardPreferencesRepository.instance.load();
