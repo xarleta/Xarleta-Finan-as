@@ -13,6 +13,14 @@ class NotificationService {
 
   bool _initialized = false;
 
+  /// Estado da inicialização, para evitar corrida entre chamadas simultâneas.
+  /// - `idle`: ainda não iniciada;
+  /// - `initializing`: em andamento (guarda o Future compartilhado);
+  /// - `initialized`: concluída com sucesso;
+  /// - `failed`: falhou (não repete automaticamente).
+  _InitState _state = _InitState.idle;
+  Future<void>? _initFuture;
+
   static const _channel = AndroidNotificationChannel(
     'xarleta_financas_bills',
     'Lembretes de contas',
@@ -23,9 +31,22 @@ class NotificationService {
   /// Indica se a inicialização das notificações foi concluída com sucesso.
   bool get isInitialized => _initialized;
 
-  Future<void> initialize() async {
-    if (_initialized) return;
+  Future<void> initialize() {
+    // Já concluída: nada a fazer.
+    if (_state == _InitState.initialized) return Future.value();
 
+    // Em andamento: reaproveita o Future compartilhado, evitando que duas
+    // chamadas concorrentes executem a inicialização em paralelo.
+    if (_state == _InitState.initializing && _initFuture != null) {
+      return _initFuture!;
+    }
+
+    _state = _InitState.initializing;
+    _initFuture = _doInitialize();
+    return _initFuture!;
+  }
+
+  Future<void> _doInitialize() async {
     // A inicialização nunca deve lançar exceção para fora: falhas de
     // notificação (ex.: plataformas sem suporte a flutter_timezone) não
     // podem impedir o aplicativo de iniciar.
@@ -57,9 +78,11 @@ class NotificationService {
       await android?.requestNotificationsPermission();
 
       _initialized = true;
+      _state = _InitState.initialized;
     } catch (_) {
       // Notificações ficam indisponíveis, mas o app continua funcional.
       _initialized = false;
+      _state = _InitState.failed;
     }
   }
 
@@ -129,3 +152,6 @@ class NotificationService {
     );
   }
 }
+
+/// Estados possíveis da inicialização das notificações.
+enum _InitState { idle, initializing, initialized, failed }
