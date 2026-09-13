@@ -109,7 +109,7 @@ class _LoadError extends StatelessWidget {
       );
 }
 
-class _Tile extends StatelessWidget {
+class _Tile extends StatefulWidget {
   final Installment item;
   final Future<void> Function() onChanged;
 
@@ -117,6 +117,59 @@ class _Tile extends StatelessWidget {
     required this.item,
     required this.onChanged,
   });
+
+  @override
+  State<_Tile> createState() => _TileState();
+}
+
+class _TileState extends State<_Tile> {
+  bool _paying = false;
+
+  Installment get item => widget.item;
+
+  Future<void> _payNext(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Pagar próxima parcela'),
+        content: Text(
+          'Confirmar o pagamento da parcela '
+          '${item.paidInstallments + 1}/${item.totalInstallments} de '
+          '"${item.name}" no valor de ${money(item.installmentAmount)}?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Confirmar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _paying = true);
+    try {
+      final paid = await InstallmentRepository.instance.payNext(item);
+      await widget.onChanged();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            paid
+                ? 'Parcela registrada.'
+                : 'Este parcelamento já foi finalizado.',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _paying = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -176,15 +229,20 @@ class _Tile extends StatelessWidget {
               children: [
                 Expanded(
                   child: FilledButton(
-                    onPressed: () async {
-                      await InstallmentRepository.instance
-                          .payNext(item);
-
-                      await onChanged();
-                    },
-                    child: const Text(
-                      'PAGAR PRÓXIMA',
-                    ),
+                    onPressed: _paying
+                        ? null
+                        : () => _payNext(context),
+                    child: _paying
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Text(
+                            'PAGAR PRÓXIMA',
+                          ),
                   ),
                 ),
 
@@ -204,7 +262,7 @@ class _Tile extends StatelessWidget {
                     );
 
                     if (x == true) {
-                      await onChanged();
+                      await widget.onChanged();
                     }
                   },
                   icon: const Icon(
@@ -241,7 +299,7 @@ class _Tile extends StatelessWidget {
                     await InstallmentRepository.instance
                         .delete(item.id!);
 
-                    await onChanged();
+                    await widget.onChanged();
                   },
                   icon: const Icon(
                     Icons.delete_outline,

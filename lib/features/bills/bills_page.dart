@@ -249,11 +249,17 @@ class _BillTileState extends State<_BillTile> {
 
     setState(() => _paying = true);
     try {
-      await BillRepository.instance.markPaid(bill);
+      final paid = await BillRepository.instance.markPaid(bill);
       await widget.onChanged();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Conta marcada como paga.')),
+          SnackBar(
+            content: Text(
+              paid
+                  ? 'Conta marcada como paga.'
+                  : 'Esta conta já estava paga.',
+            ),
+          ),
         );
       }
     } finally {

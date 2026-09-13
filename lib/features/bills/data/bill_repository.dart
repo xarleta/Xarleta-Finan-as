@@ -37,13 +37,34 @@ class BillRepository {
     await BillReminderService.instance.cancel(id);
   }
 
-  Future<void> markPaid(Bill bill) async {
-    if (bill.id == null) return;
+  /// Marca a conta como paga e registra a transação correspondente.
+  ///
+  /// Retorna `true` se o pagamento foi efetivado e `false` se a conta já
+  /// estava paga (ou não existe mais). A validação de estado é feita dentro
+  /// da transação, relendo o registro no banco, para impedir pagamentos
+  /// duplicados mesmo em chamadas simultâneas — a flag de UI não é a única
+  /// proteção.
+  Future<bool> markPaid(Bill bill) async {
+    if (bill.id == null) return false;
     final db = await AppDatabase.instance.database;
     int? nextId;
     Bill? nextBill;
+    var paid = false;
 
     await db.transaction((txn) async {
+      final rows = await txn.query(
+        'bills',
+        columns: ['status'],
+        where: 'id = ?',
+        whereArgs: [bill.id],
+        limit: 1,
+      );
+
+      // Conta inexistente ou já paga: não cria transação nem duplica.
+      if (rows.isEmpty || rows.first['status'] == 'paid') {
+        return;
+      }
+
       await txn.update(
         'bills',
         {'status': 'paid'},
@@ -77,12 +98,17 @@ class BillRepository {
         nextId = await txn.insert('bills', next.toMap());
         nextBill = _withId(next, nextId!);
       }
+
+      paid = true;
     });
+
+    if (!paid) return false;
 
     await BillReminderService.instance.cancel(bill.id!);
     if (nextBill != null) {
       await BillReminderService.instance.sync(nextBill!);
     }
+    return true;
   }
 
   Bill _withId(Bill bill, int id) => Bill(
