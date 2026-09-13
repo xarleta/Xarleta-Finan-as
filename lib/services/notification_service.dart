@@ -94,6 +94,11 @@ class NotificationService {
   }) async {
     await initialize();
 
+    // Plataformas sem implementação do plugin (ex.: desktop) não devem
+    // propagar erro: o agendamento é um efeito secundário e não pode
+    // interromper a operação principal (criar/editar conta).
+    if (!_initialized) return;
+
     final when = tz.TZDateTime.from(
       scheduledAt,
       tz.local,
@@ -105,32 +110,45 @@ class NotificationService {
       return;
     }
 
-    await _plugin.zonedSchedule(
-      id,
-      title,
-      body,
-      when,
-      const NotificationDetails(
-        android: AndroidNotificationDetails(
-          'xarleta_financas_bills',
-          'Lembretes de contas',
-          channelDescription:
-          'Lembretes de vencimento e pagamentos',
-          importance: Importance.high,
-          priority: Priority.high,
+    try {
+      await _plugin.zonedSchedule(
+        id,
+        title,
+        body,
+        when,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'xarleta_financas_bills',
+            'Lembretes de contas',
+            channelDescription:
+            'Lembretes de vencimento e pagamentos',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
         ),
-      ),
-      androidScheduleMode:
-      AndroidScheduleMode.inexactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation:
-      UILocalNotificationDateInterpretation.absoluteTime,
-    );
+        androidScheduleMode:
+        AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+        UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    } catch (_) {
+      // Falha ao agendar não deve interromper o fluxo principal.
+    }
   }
 
   Future<void> cancel(int id) async {
     await initialize();
 
-    await _plugin.cancel(id);
+    // Sem inicialização bem-sucedida o plugin não está disponível
+    // (ex.: desktop/testes); cancelar é um efeito secundário e não pode
+    // lançar exceção para o chamador.
+    if (!_initialized) return;
+
+    try {
+      await _plugin.cancel(id);
+    } catch (_) {
+      // Falha ao cancelar não deve interromper o fluxo principal.
+    }
   }
 
   Future<void> showTest() async {
