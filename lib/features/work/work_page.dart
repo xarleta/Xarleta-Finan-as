@@ -97,6 +97,9 @@ class _WorkPageState extends State<WorkPage> {
         onPressed: () async {
           await Navigator.push(
               context, MaterialPageRoute(builder: (_) => const WorkFormPage()));
+          // A tela pode ter sido descartada enquanto o formulário estava
+          // aberto; sem esta verificação o setState lançaria após o dispose.
+          if (!mounted) return;
           setState(() => _sessionsFuture = _load());
         },
       ),
