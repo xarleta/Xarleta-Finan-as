@@ -10,12 +10,16 @@ void main() {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
 
-    final databasePath = join(
-      await getDatabasesPath(),
-      'xarleta_financas.db',
+    // Diretório próprio para não colidir com outros testes de banco
+    // executados em paralelo pelo `flutter test`.
+    final dir = join(
+      Directory.systemTemp.path,
+      'xarleta_test_migration',
     );
+    await databaseFactory.setDatabasesPath(dir);
+    final databasePath = join(dir, 'xarleta_financas.db');
     await deleteDatabase(databasePath);
-    await Directory(dirname(databasePath)).create(recursive: true);
+    await Directory(dir).create(recursive: true);
 
     final legacy = await openDatabase(
       databasePath,
