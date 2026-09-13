@@ -124,21 +124,96 @@ class _CategoriesPageState extends State<CategoriesPage> {
     if (ok == true && controller.text.trim().isNotEmpty) {
       final db = await AppDatabase.instance.database;
 
+      try {
+        await db.update(
+          'categories',
+          {
+            'name': controller.text.trim(),
+          },
+          where: 'id=?',
+          whereArgs: [row['id']],
+        );
+
+        if (mounted) {
+          await _refresh();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Não foi possível salvar a categoria. '
+                'Verifique se o nome já existe.',
+              ),
+            ),
+          );
+        }
+      }
+    }
+
+    controller.dispose();
+  }
+
+  /// Desativa a categoria (soft delete), preservando o histórico de
+  /// lançamentos que já a utilizam. A coluna `active` passa a ser 0 e a
+  /// categoria deixa de aparecer nas listas e nos formulários.
+  Future<void> removeCategory(Map<String, Object?> row) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remover categoria'),
+        content: Text(
+          'Deseja remover "${row['name']}"? Os lançamentos já registrados '
+          'com esta categoria serão mantidos.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    // O showDialog acima é um gap assíncrono; garante que o State ainda
+    // está montado antes de acessar o BuildContext.
+    if (!mounted) return;
+
+    // Captura o messenger antes de qualquer novo await para não usar o
+    // BuildContext após um gap assíncrono.
+    final messenger = ScaffoldMessenger.of(context);
+
+    final db = await AppDatabase.instance.database;
+
+    try {
       await db.update(
         'categories',
-        {
-          'name': controller.text.trim(),
-        },
+        {'active': 0},
         where: 'id=?',
         whereArgs: [row['id']],
       );
 
       if (mounted) {
         await _refresh();
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Categoria removida.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Não foi possível remover a categoria.'),
+          ),
+        );
       }
     }
-
-    controller.dispose();
   }
 
   @override
@@ -226,8 +301,24 @@ class _CategoriesPageState extends State<CategoriesPage> {
 
                     return ListTile(
                       title: Text(row['name'] as String),
-                      trailing: const Icon(
-                        Icons.edit_outlined,
+                      trailing: PopupMenuButton<String>(
+                        onSelected: (value) {
+                          if (value == 'edit') {
+                            edit(row);
+                          } else if (value == 'remove') {
+                            removeCategory(row);
+                          }
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                            value: 'edit',
+                            child: Text('Editar'),
+                          ),
+                          PopupMenuItem(
+                            value: 'remove',
+                            child: Text('Remover'),
+                          ),
+                        ],
                       ),
                       onTap: () => edit(row),
                     );
