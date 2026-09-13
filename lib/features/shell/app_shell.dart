@@ -211,7 +211,7 @@ class _QuickAdd extends StatelessWidget {
                   }
                 },
                 icon: const Icon(Icons.add),
-                label: const Text('NOVO GANHO OU GASTO'),
+                label: const Text('NOVA MOVIMENTAÇÃO'),
               ),
             ),
             const SizedBox(height: 12),
