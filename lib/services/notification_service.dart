@@ -46,6 +46,16 @@ class NotificationService {
     return _initFuture!;
   }
 
+  /// Tempo máximo aguardado pelas chamadas de plugin durante a inicialização.
+  ///
+  /// Em plataformas sem implementação do plugin (desktop, testes) ou com o
+  /// canal de plataforma indisponível, as chamadas de método podem nunca
+  /// responder. Sem um limite, o `await` ficaria pendurado indefinidamente e
+  /// travaria quem aguarda a inicialização — inclusive o fluxo de pagamento de
+  /// contas, que sincroniza lembretes. O timeout garante que a inicialização
+  /// sempre conclua, marcando as notificações como indisponíveis.
+  static const _initTimeout = Duration(seconds: 5);
+
   Future<void> _doInitialize() async {
     // A inicialização nunca deve lançar exceção para fora: falhas de
     // notificação (ex.: plataformas sem suporte a flutter_timezone) não
@@ -54,7 +64,8 @@ class NotificationService {
       tz.initializeTimeZones();
 
       try {
-        final zone = await FlutterTimezone.getLocalTimezone();
+        final zone = await FlutterTimezone.getLocalTimezone()
+            .timeout(_initTimeout);
         tz.setLocalLocation(tz.getLocation(zone));
       } catch (_) {
         // Mantém o fuso padrão do pacote timezone (UTC) quando a
@@ -67,15 +78,15 @@ class NotificationService {
         ),
       );
 
-      await _plugin.initialize(settings);
+      await _plugin.initialize(settings).timeout(_initTimeout);
 
       final android =
       _plugin.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
 
-      await android?.createNotificationChannel(_channel);
+      await android?.createNotificationChannel(_channel).timeout(_initTimeout);
 
-      await android?.requestNotificationsPermission();
+      await android?.requestNotificationsPermission().timeout(_initTimeout);
 
       _initialized = true;
       _state = _InitState.initialized;
