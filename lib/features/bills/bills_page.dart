@@ -25,6 +25,10 @@ class _BillsPageState extends State<BillsPage> {
   }
 
   Future<void> _refresh() async {
+    // Pode ser chamado após `await Navigator.push` (ex.: retorno do formulário
+    // de conta). Se a tela já tiver sido descartada, o `setState` lançaria; a
+    // verificação mantém o comportamento quando a tela está viva.
+    if (!mounted) return;
     setState(() {
       _billsFuture = BillRepository.instance.list();
       _countsFuture = BillRepository.instance.counts();

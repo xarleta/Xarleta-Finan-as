@@ -22,6 +22,10 @@ class _InstallmentsPageState extends State<InstallmentsPage> {
   }
 
   Future<void> refresh() async {
+    // Pode ser chamado após `await Navigator.push` (ex.: retorno do formulário
+    // de parcelamento). Se a tela já tiver sido descartada, o `setState`
+    // lançaria; a verificação mantém o comportamento quando a tela está viva.
+    if (!mounted) return;
     setState(() => _itemsFuture = InstallmentRepository.instance.list());
     await _itemsFuture;
   }
