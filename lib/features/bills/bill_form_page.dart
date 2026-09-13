@@ -28,7 +28,10 @@ class _BillFormPageState extends State<BillFormPage> {
   late String recurrence;
   late int reminder;
 
-  /// Categorias de despesa carregadas do banco.
+  /// Tipo da movimentação recorrente: `expense` ou `income`.
+  late String type;
+
+  /// Categorias carregadas do banco para o tipo selecionado.
   List<String> categories = const [];
 
   /// Indica se as categorias ainda estão sendo carregadas.
@@ -63,6 +66,8 @@ class _BillFormPageState extends State<BillFormPage> {
 
     reminder = x?.reminderDays ?? 1;
 
+    type = x?.type ?? 'expense';
+
     _loadCategories();
   }
 
@@ -73,7 +78,7 @@ class _BillFormPageState extends State<BillFormPage> {
     });
 
     try {
-      final names = await CategoryRepository.instance.namesByType('expense');
+      final names = await CategoryRepository.instance.namesByType(type);
 
       if (!mounted) return;
 
@@ -110,12 +115,14 @@ class _BillFormPageState extends State<BillFormPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isIncome = type == 'income';
+
     return Scaffold(
       appBar: AppBar(
         title: Text(
           widget.initial == null
-              ? 'Nova conta'
-              : 'Editar conta',
+              ? (isIncome ? 'Nova receita recorrente' : 'Nova despesa recorrente')
+              : 'Editar recorrência',
         ),
       ),
 
@@ -124,10 +131,33 @@ class _BillFormPageState extends State<BillFormPage> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(
+                  value: 'expense',
+                  label: Text('Despesa'),
+                ),
+                ButtonSegment(
+                  value: 'income',
+                  label: Text('Receita'),
+                ),
+              ],
+              selected: {type},
+              onSelectionChanged: (v) {
+                setState(() {
+                  type = v.first;
+                  category = '';
+                });
+                _loadCategories();
+              },
+            ),
+
+            const SizedBox(height: 16),
+
             TextFormField(
               controller: name,
-              decoration: const InputDecoration(
-                labelText: 'Nome da conta',
+              decoration: InputDecoration(
+                labelText: isIncome ? 'Descrição da receita' : 'Nome da conta',
               ),
               validator: (v) =>
                   (v ?? '').trim().isEmpty
@@ -338,6 +368,7 @@ class _BillFormPageState extends State<BillFormPage> {
       notes: notes.text.trim().isEmpty
           ? null
           : notes.text.trim(),
+      type: type,
     );
 
     if (widget.initial == null) {

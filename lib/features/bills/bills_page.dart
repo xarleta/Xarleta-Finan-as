@@ -227,14 +227,19 @@ class _BillTileState extends State<_BillTile> {
   Future<void> _pay() async {
     if (_paying) return;
 
+    final isIncome = bill.isIncome;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Marcar como paga'),
+          title: Text(isIncome ? 'Marcar como recebida' : 'Marcar como paga'),
           content: Text(
-            'Confirmar o pagamento de "${bill.name}" no valor de '
-            '${money(bill.amount)}?',
+            isIncome
+                ? 'Confirmar o recebimento de "${bill.name}" no valor de '
+                    '${money(bill.amount)}?'
+                : 'Confirmar o pagamento de "${bill.name}" no valor de '
+                    '${money(bill.amount)}?',
           ),
           actions: [
             TextButton(
@@ -261,8 +266,12 @@ class _BillTileState extends State<_BillTile> {
           SnackBar(
             content: Text(
               paid
-                  ? 'Conta marcada como paga.'
-                  : 'Esta conta já estava paga.',
+                  ? (isIncome
+                      ? 'Receita marcada como recebida.'
+                      : 'Conta marcada como paga.')
+                  : (isIncome
+                      ? 'Esta receita já havia sido recebida.'
+                      : 'Esta conta já estava paga.'),
             ),
           ),
         );
@@ -273,11 +282,15 @@ class _BillTileState extends State<_BillTile> {
   }
 
   Future<void> _deleteBill(BuildContext context) async {
+    final isIncome = bill.isIncome;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Excluir conta'),
+          title: Text(
+            isIncome ? 'Excluir receita recorrente' : 'Excluir conta',
+          ),
           content: Text(
             'Deseja realmente excluir "${bill.name}"?',
           ),
@@ -306,8 +319,10 @@ class _BillTileState extends State<_BillTile> {
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Conta excluída.'),
+          SnackBar(
+            content: Text(
+              isIncome ? 'Receita recorrente excluída.' : 'Conta excluída.',
+            ),
           ),
         );
       }
@@ -332,25 +347,33 @@ class _BillTileState extends State<_BillTile> {
 
     final overdue = dueDate.isBefore(today);
 
+    final isIncome = bill.isIncome;
+
     return Card(
       child: ListTile(
         leading: CircleAvatar(
           child: Icon(
-            overdue ? Icons.warning_amber_rounded : Icons.receipt_long,
-            color: overdue ? AppTheme.negative : null,
+            overdue
+                ? Icons.warning_amber_rounded
+                : (isIncome ? Icons.arrow_downward : Icons.receipt_long),
+            color: overdue
+                ? AppTheme.negative
+                : (isIncome ? AppTheme.positive : null),
           ),
         ),
         title: Text(bill.name),
         subtitle: Text(
-          '${dateText(bill.dueDate)} • ${_recurrenceText(bill.recurrence)}',
+          '${dateText(bill.dueDate)} • ${_recurrenceText(bill.recurrence)}'
+          '${isIncome ? ' • Receita' : ''}',
         ),
         trailing: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               money(bill.amount),
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.bold,
+                color: isIncome ? AppTheme.positive : null,
               ),
             ),
             TextButton(
@@ -361,7 +384,7 @@ class _BillTileState extends State<_BillTile> {
                       height: 16,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('PAGAR'),
+                  : Text(isIncome ? 'RECEBER' : 'PAGAR'),
             ),
           ],
         ),
