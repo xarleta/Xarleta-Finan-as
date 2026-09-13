@@ -72,10 +72,21 @@ class _CategoriesPageState extends State<CategoriesPage> {
             'active': 1,
           },
         );
-      } catch (_) {}
 
-      if (mounted) {
-        await _refresh();
+        if (mounted) {
+          await _refresh();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Não foi possível salvar a categoria. '
+                'Verifique se o nome já existe.',
+              ),
+            ),
+          );
+        }
       }
     }
 
