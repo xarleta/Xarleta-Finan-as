@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/notification_service.dart';
 import '../categories/categories_page.dart';
+import '../dashboard/dashboard_customize_page.dart';
 import 'data_management_page.dart';
 import 'notification_settings_page.dart';
 import 'security_settings_page.dart';
@@ -110,10 +111,18 @@ class SettingsPageV6 extends StatelessWidget {
             ),
           ),
 
-          const Card(
+          Card(
             child: ListTile(
-              leading: Icon(Icons.dashboard_customize_outlined),
-              title: Text('Personalizar dashboard'),
+              leading: const Icon(Icons.dashboard_customize_outlined),
+              title: const Text('Personalizar dashboard'),
+              subtitle: const Text('Mostrar, ocultar e reordenar os cards'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const DashboardCustomizePage(),
+                ),
+              ),
             ),
           ),
 
