@@ -175,6 +175,131 @@ class _GoalsPageState extends State<GoalsPage> {
     controller.dispose();
   }
 
+  /// Edita nome, valor alvo e prazo de uma meta existente.
+  Future<void> editGoal(Map<String, Object?> g) async {
+    final name = TextEditingController(text: g['name'] as String);
+    final target = TextEditingController(
+      text: (g['target_amount'] as num).toDouble().toString(),
+    );
+    DateTime? deadline = g['deadline'] == null
+        ? null
+        : DateTime.tryParse(g['deadline'] as String);
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) => AlertDialog(
+          title: const Text('Editar meta'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: name,
+                decoration: const InputDecoration(
+                  labelText: 'Nome',
+                ),
+              ),
+              TextField(
+                controller: target,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Valor alvo',
+                ),
+              ),
+              ListTile(
+                title: Text(
+                  deadline == null ? 'Sem prazo' : dateText(deadline!),
+                ),
+                trailing: const Icon(Icons.calendar_today),
+                onTap: () async {
+                  final d = await showDatePicker(
+                    context: c,
+                    initialDate: deadline ?? DateTime.now(),
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2100),
+                  );
+
+                  if (d != null) {
+                    set(() => deadline = d);
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Salvar'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (ok == true &&
+        name.text.trim().isNotEmpty &&
+        parseBrazilianNumber(target.text) > 0) {
+      final db = await AppDatabase.instance.database;
+
+      await db.update(
+        'goals',
+        {
+          'name': name.text.trim(),
+          'target_amount': parseBrazilianNumber(target.text),
+          'deadline': deadline?.toIso8601String(),
+        },
+        where: 'id=?',
+        whereArgs: [g['id']],
+      );
+
+      await _refresh();
+    }
+
+    name.dispose();
+    target.dispose();
+  }
+
+  /// Desativa a meta (soft delete), preservando o histórico de contribuições.
+  Future<void> deleteGoal(Map<String, Object?> g) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remover meta'),
+        content: Text(
+          'Deseja remover "${g['name']}"? O histórico de contribuições '
+          'será mantido.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final db = await AppDatabase.instance.database;
+
+    await db.update(
+      'goals',
+      {'active': 0},
+      where: 'id=?',
+      whereArgs: [g['id']],
+    );
+
+    await _refresh();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -230,12 +355,37 @@ class _GoalsPageState extends State<GoalsPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        g['name'] as String,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 17,
-                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              g['name'] as String,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 17,
+                              ),
+                            ),
+                          ),
+                          PopupMenuButton<String>(
+                            onSelected: (value) {
+                              if (value == 'edit') {
+                                editGoal(g);
+                              } else if (value == 'remove') {
+                                deleteGoal(g);
+                              }
+                            },
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(
+                                value: 'edit',
+                                child: Text('Editar'),
+                              ),
+                              PopupMenuItem(
+                                value: 'remove',
+                                child: Text('Remover'),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 8),
                       Text(
