@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/utils/formatters.dart';
+import '../categories/data/category_repository.dart';
 import 'data/transaction_repository.dart';
 import 'domain/transaction_model.dart';
 
@@ -28,31 +29,14 @@ class _TransactionFormPageState
   late String _category;
   late DateTime _date;
 
-  final incomeCategories = const [
-    'Salário',
-    'Uber',
-    '99',
-    'Entregas',
-    'Motoboy',
-    'Música',
-    'Vendas',
-    'Freelance',
-    'Outros',
-  ];
+  /// Categorias carregadas do banco para o tipo selecionado.
+  List<String> _categories = const [];
 
-  final expenseCategories = const [
-    'Alimentação',
-    'Mercado',
-    'Combustível',
-    'Moradia',
-    'Internet',
-    'Telefone',
-    'Academia',
-    'Assinaturas',
-    'Trabalho',
-    'Lazer',
-    'Outros',
-  ];
+  /// Indica se as categorias ainda estão sendo carregadas.
+  bool _loadingCategories = true;
+
+  /// Erro ocorrido ao carregar as categorias (null quando não há erro).
+  Object? _categoriesError;
 
   @override
   void initState() {
@@ -74,12 +58,46 @@ class _TransactionFormPageState
 
     _type = item?.type ?? TransactionType.expense;
 
-    _category = item?.category ??
-        (_type == TransactionType.income
-            ? incomeCategories.first
-            : expenseCategories.first);
+    _category = item?.category ?? '';
 
     _date = item?.date ?? DateTime.now();
+
+    _loadCategories();
+  }
+
+  Future<void> _loadCategories() async {
+    setState(() {
+      _loadingCategories = true;
+      _categoriesError = null;
+    });
+
+    try {
+      final names = await CategoryRepository.instance.namesByType(
+        _type == TransactionType.income ? 'income' : 'expense',
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _categories = names;
+        _loadingCategories = false;
+
+        // Mantém a categoria atual quando ainda existir; caso contrário,
+        // seleciona a primeira disponível. Se não houver categorias, mantém
+        // o valor atual (inclusive o de um lançamento antigo) para não
+        // quebrar registros existentes.
+        if (_categories.isNotEmpty && !_categories.contains(_category)) {
+          _category = _categories.first;
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _loadingCategories = false;
+        _categoriesError = e;
+      });
+    }
   }
 
   @override
@@ -93,14 +111,6 @@ class _TransactionFormPageState
 
   @override
   Widget build(BuildContext context) {
-    final categories = _type == TransactionType.income
-        ? incomeCategories
-        : expenseCategories;
-
-    if (!categories.contains(_category)) {
-      _category = categories.first;
-    }
-
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -130,12 +140,9 @@ class _TransactionFormPageState
               onSelectionChanged: (v) {
                 setState(() {
                   _type = v.first;
-
-                  _category =
-                      _type == TransactionType.income
-                          ? incomeCategories.first
-                          : expenseCategories.first;
+                  _category = '';
                 });
+                _loadCategories();
               },
             ),
 
@@ -172,27 +179,56 @@ class _TransactionFormPageState
 
             const SizedBox(height: 12),
 
-            DropdownButtonFormField<String>(
-              initialValue: _category,
-              decoration: const InputDecoration(
-                labelText: 'Categoria',
+            if (_loadingCategories)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_categoriesError != null)
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.error_outline),
+                  title: const Text('Não foi possível carregar as categorias.'),
+                  trailing: TextButton(
+                    onPressed: _loadCategories,
+                    child: const Text('TENTAR NOVAMENTE'),
+                  ),
+                ),
+              )
+            else if (_categories.isEmpty)
+              const Card(
+                child: ListTile(
+                  leading: Icon(Icons.info_outline),
+                  title: Text('Nenhuma categoria cadastrada.'),
+                  subtitle: Text(
+                    'Cadastre categorias em Categorias para selecioná-las aqui.',
+                  ),
+                ),
+              )
+            else
+              DropdownButtonFormField<String>(
+                initialValue: _categories.contains(_category)
+                    ? _category
+                    : null,
+                decoration: const InputDecoration(
+                  labelText: 'Categoria',
+                ),
+                items: _categories
+                    .map(
+                      (e) => DropdownMenuItem(
+                        value: e,
+                        child: Text(e),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) {
+                    setState(() {
+                      _category = v;
+                    });
+                  }
+                },
               ),
-              items: categories
-                  .map(
-                    (e) => DropdownMenuItem(
-                      value: e,
-                      child: Text(e),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (v) {
-                if (v != null) {
-                  setState(() {
-                    _category = v;
-                  });
-                }
-              },
-            ),
 
             const SizedBox(height: 12),
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/utils/formatters.dart';
+import '../categories/data/category_repository.dart';
 import 'data/installment_repository.dart';
 import 'domain/installment_model.dart';
 
@@ -29,14 +30,14 @@ class _InstallmentFormPageState
   late DateTime due;
   late String category;
 
-  final cats = const [
-    'Cartão',
-    'Eletrônicos',
-    'Veículo',
-    'Casa',
-    'Trabalho',
-    'Outros',
-  ];
+  /// Categorias de despesa carregadas do banco.
+  List<String> cats = const [];
+
+  /// Indica se as categorias ainda estão sendo carregadas.
+  bool loadingCategories = true;
+
+  /// Erro ocorrido ao carregar as categorias (null quando não há erro).
+  Object? categoriesError;
 
   @override
   void initState() {
@@ -66,7 +67,42 @@ class _InstallmentFormPageState
 
     due = x?.firstDueDate ?? DateTime.now();
 
-    category = x?.category ?? cats.first;
+    category = x?.category ?? '';
+
+    _loadCategories();
+  }
+
+  Future<void> _loadCategories() async {
+    setState(() {
+      loadingCategories = true;
+      categoriesError = null;
+    });
+
+    try {
+      final names = await CategoryRepository.instance.namesByType('expense');
+
+      if (!mounted) return;
+
+      setState(() {
+        cats = names;
+        loadingCategories = false;
+
+        // Mantém a categoria atual quando ainda existir; caso contrário,
+        // seleciona a primeira disponível. Se não houver categorias, mantém
+        // o valor atual (inclusive o de um parcelamento antigo) para não
+        // quebrar registros existentes.
+        if (cats.isNotEmpty && !cats.contains(category)) {
+          category = cats.first;
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        loadingCategories = false;
+        categoriesError = e;
+      });
+    }
   }
 
   @override
@@ -153,27 +189,54 @@ class _InstallmentFormPageState
 
             const SizedBox(height: 12),
 
-            DropdownButtonFormField<String>(
-              initialValue: category,
-              decoration: const InputDecoration(
-                labelText: 'Categoria',
+            if (loadingCategories)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (categoriesError != null)
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.error_outline),
+                  title: const Text('Não foi possível carregar as categorias.'),
+                  trailing: TextButton(
+                    onPressed: _loadCategories,
+                    child: const Text('TENTAR NOVAMENTE'),
+                  ),
+                ),
+              )
+            else if (cats.isEmpty)
+              const Card(
+                child: ListTile(
+                  leading: Icon(Icons.info_outline),
+                  title: Text('Nenhuma categoria cadastrada.'),
+                  subtitle: Text(
+                    'Cadastre categorias em Categorias para selecioná-las aqui.',
+                  ),
+                ),
+              )
+            else
+              DropdownButtonFormField<String>(
+                initialValue: cats.contains(category) ? category : null,
+                decoration: const InputDecoration(
+                  labelText: 'Categoria',
+                ),
+                items: cats
+                    .map(
+                      (x) => DropdownMenuItem(
+                        value: x,
+                        child: Text(x),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) {
+                    setState(() {
+                      category = v;
+                    });
+                  }
+                },
               ),
-              items: cats
-                  .map(
-                    (x) => DropdownMenuItem(
-                      value: x,
-                      child: Text(x),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (v) {
-                if (v != null) {
-                  setState(() {
-                    category = v;
-                  });
-                }
-              },
-            ),
 
             const SizedBox(height: 12),
 
