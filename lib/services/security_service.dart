@@ -7,9 +7,18 @@ class SecurityService {
 
   final LocalAuthentication _auth = LocalAuthentication();
 
+  /// Indica se há biometria **realmente utilizável** no aparelho.
+  ///
+  /// Não basta o dispositivo "suportar" biometria (`isDeviceSupported`): é
+  /// preciso que exista ao menos uma biometria cadastrada. Caso contrário
+  /// (ex.: Windows sem Windows Hello configurado), o app poderia se bloquear
+  /// sem oferecer nenhuma forma de desbloqueio.
   Future<bool> canUseBiometrics() async {
     try {
-      return await _auth.canCheckBiometrics || await _auth.isDeviceSupported();
+      final canCheck = await _auth.canCheckBiometrics;
+      if (!canCheck) return false;
+      final available = await _auth.getAvailableBiometrics();
+      return available.isNotEmpty;
     } on PlatformException {
       return false;
     }
