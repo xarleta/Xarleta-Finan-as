@@ -6,7 +6,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:xarleta_financas/core/database/app_database.dart';
 
 void main() {
-  test('migra uma base legada para a versao 8 sem apagar transacoes', () async {
+  test('migra uma base legada para a versao 9 sem apagar transacoes', () async {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
 
@@ -47,10 +47,19 @@ void main() {
     await legacy.close();
 
     final upgraded = await AppDatabase.instance.database;
-    expect(await upgraded.getVersion(), 8);
+    expect(await upgraded.getVersion(), 9);
     expect(
       (await upgraded.query('transactions')).single['description'],
       'Registro legado',
+    );
+
+    // A migração v9 adiciona a coluna `type` em `bills` para representar
+    // receita recorrente reutilizando a arquitetura de recorrência existente.
+    final billColumns = await upgraded.rawQuery('PRAGMA table_info(bills)');
+    expect(
+      billColumns.map((c) => c['name']),
+      contains('type'),
+      reason: 'a coluna type deve existir após a migração v9',
     );
 
     for (final table in [
