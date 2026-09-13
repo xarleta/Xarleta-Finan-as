@@ -179,7 +179,7 @@ class _Count extends StatelessWidget {
   }
 }
 
-class _BillTile extends StatelessWidget {
+class _BillTile extends StatefulWidget {
   final Bill bill;
   final Future<void> Function() onChanged;
 
@@ -187,6 +187,15 @@ class _BillTile extends StatelessWidget {
     required this.bill,
     required this.onChanged,
   });
+
+  @override
+  State<_BillTile> createState() => _BillTileState();
+}
+
+class _BillTileState extends State<_BillTile> {
+  bool _paying = false;
+
+  Bill get bill => widget.bill;
 
   String _recurrenceText(String recurrence) {
     switch (recurrence) {
@@ -207,6 +216,48 @@ class _BillTile extends StatelessWidget {
 
       default:
         return recurrence;
+    }
+  }
+
+  Future<void> _pay() async {
+    if (_paying) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Marcar como paga'),
+          content: Text(
+            'Confirmar o pagamento de "${bill.name}" no valor de '
+            '${money(bill.amount)}?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Confirmar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _paying = true);
+    try {
+      await BillRepository.instance.markPaid(bill);
+      await widget.onChanged();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Conta marcada como paga.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _paying = false);
     }
   }
 
@@ -240,7 +291,7 @@ class _BillTile extends StatelessWidget {
     if (confirmed == true) {
       await BillRepository.instance.delete(bill.id!);
 
-      await onChanged();
+      await widget.onChanged();
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -292,20 +343,14 @@ class _BillTile extends StatelessWidget {
               ),
             ),
             TextButton(
-              onPressed: () async {
-                await BillRepository.instance.markPaid(bill);
-
-                await onChanged();
-
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Conta marcada como paga.'),
-                    ),
-                  );
-                }
-              },
-              child: const Text('PAGAR'),
+              onPressed: _paying ? null : _pay,
+              child: _paying
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('PAGAR'),
             ),
           ],
         ),
@@ -320,7 +365,7 @@ class _BillTile extends StatelessWidget {
           );
 
           if (changed == true) {
-            await onChanged();
+            await widget.onChanged();
           }
         },
         onLongPress: () {
