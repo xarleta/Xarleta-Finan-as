@@ -9,12 +9,30 @@ class Bill {
   final String status;
   final String? notes;
 
-  const Bill({this.id, required this.name, required this.amount, required this.dueDate, required this.category, this.recurrence='once', this.reminderDays=1, this.status='pending', this.notes});
+  /// Tipo da movimentação recorrente: `expense` (despesa) ou `income`
+  /// (receita). Registros antigos assumem `expense` para preservar o
+  /// comportamento anterior.
+  final String type;
+
+  const Bill({
+    this.id,
+    required this.name,
+    required this.amount,
+    required this.dueDate,
+    required this.category,
+    this.recurrence = 'once',
+    this.reminderDays = 1,
+    this.status = 'pending',
+    this.notes,
+    this.type = 'expense',
+  });
+
+  bool get isIncome => type == 'income';
 
   Map<String, dynamic> toMap() => {
     'name': name, 'amount': amount, 'due_date': dueDate.toIso8601String(),
     'category': category, 'recurrence': recurrence, 'reminder_days': reminderDays,
-    'status': status, 'notes': notes,
+    'status': status, 'notes': notes, 'type': type,
   };
 
   factory Bill.fromMap(Map<String,dynamic> m) => Bill(
@@ -22,6 +40,6 @@ class Bill {
     dueDate: DateTime.parse(m['due_date'] as String), category: m['category'] as String,
     recurrence: m['recurrence'] as String? ?? 'once', reminderDays: (m['reminder_days'] as num? ?? 1).toInt(),
     status: m['status'] as String? ?? 'pending', notes: m['notes'] as String?,
+    type: m['type'] as String? ?? 'expense',
   );
 }
-

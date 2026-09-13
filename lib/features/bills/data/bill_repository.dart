@@ -6,11 +6,23 @@ class BillRepository {
   BillRepository._();
   static final instance = BillRepository._();
 
-  Future<List<Bill>> list({bool includePaid = false}) async {
+  Future<List<Bill>> list({bool includePaid = false, String? type}) async {
     final db = await AppDatabase.instance.database;
+    final where = <String>[];
+    final args = <Object?>[];
+
+    if (!includePaid) {
+      where.add("status = 'pending'");
+    }
+    if (type != null) {
+      where.add('type = ?');
+      args.add(type);
+    }
+
     final rows = await db.query(
       'bills',
-      where: includePaid ? null : "status = 'pending'",
+      where: where.isEmpty ? null : where.join(' AND '),
+      whereArgs: args.isEmpty ? null : args,
       orderBy: 'due_date ASC',
     );
     return rows.map(Bill.fromMap).toList();
@@ -74,12 +86,12 @@ class BillRepository {
 
       final now = DateTime.now().toIso8601String();
       await txn.insert('transactions', {
-        'type': 'expense',
+        'type': bill.isIncome ? 'income' : 'expense',
         'amount': bill.amount,
         'description': bill.name,
         'category': bill.category,
         'transaction_date': now,
-        'notes': 'Conta paga',
+        'notes': bill.isIncome ? 'Receita recebida' : 'Conta paga',
         'created_at': now,
         'updated_at': now,
       });
@@ -94,6 +106,7 @@ class BillRepository {
           recurrence: bill.recurrence,
           reminderDays: bill.reminderDays,
           notes: bill.notes,
+          type: bill.type,
         );
         nextId = await txn.insert('bills', next.toMap());
         nextBill = _withId(next, nextId!);
@@ -121,6 +134,7 @@ class BillRepository {
     reminderDays: bill.reminderDays,
     status: bill.status,
     notes: bill.notes,
+    type: bill.type,
   );
 
   DateTime? _nextDate(DateTime date, String recurrence) {
@@ -136,8 +150,8 @@ class BillRepository {
     }
   }
 
-  Future<Map<String, int>> counts() async {
-    final bills = await list();
+  Future<Map<String, int>> counts({String? type}) async {
+    final bills = await list(type: type);
     final today = DateTime.now();
     final current = DateTime(today.year, today.month, today.day);
     int overdue = 0;

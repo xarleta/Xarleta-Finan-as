@@ -12,7 +12,7 @@ class AppDatabase {
     final path = join(await getDatabasesPath(), 'xarleta_financas.db');
     _database = await openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: _create,
       onUpgrade: _upgrade,
     );
@@ -45,11 +45,20 @@ class AppDatabase {
       await db.execute('CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE,type TEXT NOT NULL,icon TEXT,active INTEGER NOT NULL DEFAULT 1)');
       await _seedCategories(db);
     }
+    // Versão 9 adiciona o tipo (receita/despesa) às contas recorrentes,
+    // permitindo representar receita recorrente reutilizando a mesma
+    // arquitetura de recorrência já existente. Registros antigos recebem
+    // 'expense' como padrão, preservando o comportamento anterior.
+    if (oldVersion < 9) {
+      await db.execute(
+        "ALTER TABLE bills ADD COLUMN type TEXT NOT NULL DEFAULT 'expense'",
+      );
+    }
   }
 
   Future<void> _create(Database db, int version) async {
     await db.execute('CREATE TABLE transactions (id INTEGER PRIMARY KEY AUTOINCREMENT,type TEXT NOT NULL,amount REAL NOT NULL CHECK(amount > 0),description TEXT NOT NULL,category TEXT NOT NULL,transaction_date TEXT NOT NULL,notes TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)');
-    await db.execute('CREATE TABLE bills (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,amount REAL NOT NULL CHECK(amount > 0),due_date TEXT NOT NULL,category TEXT NOT NULL,recurrence TEXT NOT NULL DEFAULT "once",reminder_days INTEGER NOT NULL DEFAULT 1,status TEXT NOT NULL DEFAULT "pending",notes TEXT)');
+    await db.execute('CREATE TABLE bills (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,amount REAL NOT NULL CHECK(amount > 0),due_date TEXT NOT NULL,category TEXT NOT NULL,recurrence TEXT NOT NULL DEFAULT "once",reminder_days INTEGER NOT NULL DEFAULT 1,status TEXT NOT NULL DEFAULT "pending",notes TEXT,type TEXT NOT NULL DEFAULT "expense")');
     await db.execute('CREATE TABLE installments (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,total_amount REAL NOT NULL,installment_amount REAL NOT NULL,total_installments INTEGER NOT NULL,paid_installments INTEGER NOT NULL DEFAULT 0,first_due_date TEXT NOT NULL,category TEXT NOT NULL,status TEXT NOT NULL DEFAULT "active",reminder_days INTEGER NOT NULL DEFAULT 1,notes TEXT)');
     await db.execute('CREATE TABLE work_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT,activity TEXT NOT NULL,session_date TEXT NOT NULL,earnings REAL NOT NULL DEFAULT 0,expenses REAL NOT NULL DEFAULT 0,hours REAL NOT NULL DEFAULT 0,kilometers REAL NOT NULL DEFAULT 0,notes TEXT)');
     await db.execute('CREATE TABLE goals (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,target_amount REAL NOT NULL CHECK(target_amount > 0),current_amount REAL NOT NULL DEFAULT 0,deadline TEXT,active INTEGER NOT NULL DEFAULT 1)');
