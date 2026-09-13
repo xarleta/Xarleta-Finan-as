@@ -214,6 +214,30 @@ class _Tile extends StatelessWidget {
 
                 IconButton(
                   onPressed: () async {
+                    final confirmed = await showDialog<bool>(
+                      context: context,
+                      builder: (dialogContext) => AlertDialog(
+                        title: const Text('Excluir parcelamento'),
+                        content: Text(
+                          'Deseja realmente excluir "${item.name}"?',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () =>
+                                Navigator.pop(dialogContext, false),
+                            child: const Text('Cancelar'),
+                          ),
+                          FilledButton(
+                            onPressed: () =>
+                                Navigator.pop(dialogContext, true),
+                            child: const Text('Excluir'),
+                          ),
+                        ],
+                      ),
+                    );
+
+                    if (confirmed != true) return;
+
                     await InstallmentRepository.instance
                         .delete(item.id!);
 
