@@ -135,6 +135,22 @@ class _ReservesPageState extends State<ReservesPage> {
 
     final current = (reserve['current_amount'] as num).toDouble();
 
+    // Retirada maior que o saldo: informa o motivo em vez de fechar em
+    // silêncio, para que o usuário entenda a recusa.
+    if (ok == true && type == 'withdraw' && amount > current) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Saldo insuficiente. Disponível: ${money(current)}.',
+            ),
+          ),
+        );
+      }
+      valueController.dispose();
+      return;
+    }
+
     if (ok == true && amount > 0 && (type == 'deposit' || amount <= current)) {
       final db = await AppDatabase.instance.database;
 
@@ -168,6 +184,116 @@ class _ReservesPageState extends State<ReservesPage> {
     }
 
     valueController.dispose();
+  }
+
+  /// Edita o nome e o valor atual de uma reserva existente.
+  Future<void> editReserve(Map<String, Object?> reserve) async {
+    final nameController = TextEditingController(
+      text: reserve['name'] as String,
+    );
+    final valueController = TextEditingController(
+      text: (reserve['current_amount'] as num).toDouble().toString(),
+    );
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Editar reserva'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Nome',
+                ),
+              ),
+              TextField(
+                controller: valueController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Valor atual',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Salvar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (ok == true && nameController.text.trim().isNotEmpty) {
+      final db = await AppDatabase.instance.database;
+
+      await db.update(
+        'reserves',
+        {
+          'name': nameController.text.trim(),
+          'current_amount': parseBrazilianNumber(valueController.text),
+        },
+        where: 'id = ?',
+        whereArgs: [reserve['id']],
+      );
+
+      await _refresh();
+    }
+
+    nameController.dispose();
+    valueController.dispose();
+  }
+
+  /// Remove a reserva e o histórico de movimentações associado.
+  Future<void> deleteReserve(Map<String, Object?> reserve) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remover reserva'),
+        content: Text(
+          'Deseja remover "${reserve['name']}"? O histórico de movimentações '
+          'desta reserva também será removido.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final db = await AppDatabase.instance.database;
+
+    await db.transaction((transaction) async {
+      await transaction.delete(
+        'reserve_movements',
+        where: 'reserve_id = ?',
+        whereArgs: [reserve['id']],
+      );
+
+      await transaction.delete(
+        'reserves',
+        where: 'id = ?',
+        whereArgs: [reserve['id']],
+      );
+    });
+
+    await _refresh();
   }
 
   @override
@@ -235,10 +361,13 @@ class _ReservesPageState extends State<ReservesPage> {
                   ),
                   trailing: PopupMenuButton<String>(
                     onSelected: (value) {
-                      move(
-                        reserve,
-                        value,
-                      );
+                      if (value == 'deposit' || value == 'withdraw') {
+                        move(reserve, value);
+                      } else if (value == 'edit') {
+                        editReserve(reserve);
+                      } else if (value == 'remove') {
+                        deleteReserve(reserve);
+                      }
                     },
                     itemBuilder: (_) {
                       return const [
@@ -252,6 +381,18 @@ class _ReservesPageState extends State<ReservesPage> {
                           value: 'withdraw',
                           child: Text(
                             'Retirar',
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: 'edit',
+                          child: Text(
+                            'Editar',
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: 'remove',
+                          child: Text(
+                            'Remover',
                           ),
                         ),
                       ];
