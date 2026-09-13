@@ -22,6 +22,41 @@ class _WorkPageState extends State<WorkPage> {
     return db.query('work_sessions', orderBy: 'session_date DESC, id DESC');
   }
 
+  /// Exclui uma sessão de trabalho após confirmação do usuário.
+  Future<void> _deleteSession(Map<String, Object?> session) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Excluir sessão'),
+        content: Text(
+          'Deseja realmente excluir "${session['activity']}"?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final db = await AppDatabase.instance.database;
+    await db.delete(
+      'work_sessions',
+      where: 'id = ?',
+      whereArgs: [session['id']],
+    );
+
+    if (!mounted) return;
+    setState(() => _sessionsFuture = _load());
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -85,7 +120,17 @@ class _WorkPageState extends State<WorkPage> {
                   title: Text(r['activity'] as String),
                   subtitle: Text(
                       'Lucro: ${money(e - x)} • ${h.toStringAsFixed(1)}h • ${km.toStringAsFixed(1)} km'),
-                  trailing: Text(h > 0 ? '${money((e - x) / h)}/h' : ''),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(h > 0 ? '${money((e - x) / h)}/h' : ''),
+                      IconButton(
+                        tooltip: 'Excluir sessão',
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () => _deleteSession(r),
+                      ),
+                    ],
+                  ),
                 ));
               }),
             ],
@@ -164,13 +209,29 @@ class _WorkFormPageState extends State<WorkFormPage> {
       );
 
   Future<void> _save() async {
+    final earningsValue = parseBrazilianNumber(earnings.text);
+    final expensesValue = parseBrazilianNumber(expenses.text);
+
+    // Uma sessão sem ganhos e sem gastos não representa nada financeiro;
+    // evita registros vazios que poluem o histórico.
+    if (earningsValue <= 0 && expensesValue <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Informe ao menos um valor de ganho ou gasto.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final db = await AppDatabase.instance.database;
     await db.insert('work_sessions', {
       'activity':
           activity.text.trim().isEmpty ? 'Trabalho' : activity.text.trim(),
       'session_date': DateTime.now().toIso8601String(),
-      'earnings': parseBrazilianNumber(earnings.text),
-      'expenses': parseBrazilianNumber(expenses.text),
+      'earnings': earningsValue,
+      'expenses': expensesValue,
       'hours': parseBrazilianNumber(hours.text),
       'kilometers': parseBrazilianNumber(km.text),
       'notes': null,
