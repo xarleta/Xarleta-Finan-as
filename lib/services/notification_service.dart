@@ -20,34 +20,47 @@ class NotificationService {
     importance: Importance.high,
   );
 
+  /// Indica se a inicialização das notificações foi concluída com sucesso.
+  bool get isInitialized => _initialized;
+
   Future<void> initialize() async {
     if (_initialized) return;
 
-    tz.initializeTimeZones();
+    // A inicialização nunca deve lançar exceção para fora: falhas de
+    // notificação (ex.: plataformas sem suporte a flutter_timezone) não
+    // podem impedir o aplicativo de iniciar.
+    try {
+      tz.initializeTimeZones();
 
-    final zone = await FlutterTimezone.getLocalTimezone();
+      try {
+        final zone = await FlutterTimezone.getLocalTimezone();
+        tz.setLocalLocation(tz.getLocation(zone));
+      } catch (_) {
+        // Mantém o fuso padrão do pacote timezone (UTC) quando a
+        // plataforma não expõe o fuso local.
+      }
 
-    tz.setLocalLocation(
-      tz.getLocation(zone),
-    );
+      const settings = InitializationSettings(
+        android: AndroidInitializationSettings(
+          '@mipmap/ic_launcher',
+        ),
+      );
 
-    const settings = InitializationSettings(
-      android: AndroidInitializationSettings(
-        '@mipmap/ic_launcher',
-      ),
-    );
+      await _plugin.initialize(settings);
 
-    await _plugin.initialize(settings);
+      final android =
+      _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
 
-    final android =
-    _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
+      await android?.createNotificationChannel(_channel);
 
-    await android?.createNotificationChannel(_channel);
+      await android?.requestNotificationsPermission();
 
-    await android?.requestNotificationsPermission();
-
-    _initialized = true;
+      _initialized = true;
+    } catch (_) {
+      // Notificações ficam indisponíveis, mas o app continua funcional.
+      _initialized = false;
+    }
   }
 
   Future<void> scheduleBillReminder({
@@ -100,10 +113,12 @@ class NotificationService {
   Future<void> showTest() async {
     await initialize();
 
+    if (!_initialized) return;
+
     await _plugin.show(
       999999,
-      'Xarleta Finan�as',
-      'Notifica��es est�o funcionando.',
+      'Xarleta Finanças',
+      'Notificações estão funcionando.',
       const NotificationDetails(
         android: AndroidNotificationDetails(
           'xarleta_financas_bills',
