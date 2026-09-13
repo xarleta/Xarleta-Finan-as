@@ -1,0 +1,137 @@
+import '../../../core/database/app_database.dart';
+import '../../../services/bill_reminder_service.dart';
+import '../domain/bill_model.dart';
+
+class BillRepository {
+  BillRepository._();
+  static final instance = BillRepository._();
+
+  Future<List<Bill>> list({bool includePaid = false}) async {
+    final db = await AppDatabase.instance.database;
+    final rows = await db.query(
+      'bills',
+      where: includePaid ? null : "status = 'pending'",
+      orderBy: 'due_date ASC',
+    );
+    return rows.map(Bill.fromMap).toList();
+  }
+
+  Future<int> create(Bill bill) async {
+    final db = await AppDatabase.instance.database;
+    final id = await db.insert('bills', bill.toMap());
+    await BillReminderService.instance.sync(_withId(bill, id));
+    return id;
+  }
+
+  Future<void> update(Bill bill) async {
+    if (bill.id == null) return;
+    final db = await AppDatabase.instance.database;
+    await db.update('bills', bill.toMap(),
+        where: 'id = ?', whereArgs: [bill.id]);
+    await BillReminderService.instance.sync(bill);
+  }
+
+  Future<void> delete(int id) async {
+    final db = await AppDatabase.instance.database;
+    await db.delete('bills', where: 'id = ?', whereArgs: [id]);
+    await BillReminderService.instance.cancel(id);
+  }
+
+  Future<void> markPaid(Bill bill) async {
+    if (bill.id == null) return;
+    final db = await AppDatabase.instance.database;
+    int? nextId;
+    Bill? nextBill;
+
+    await db.transaction((txn) async {
+      await txn.update(
+        'bills',
+        {'status': 'paid'},
+        where: 'id = ?',
+        whereArgs: [bill.id],
+      );
+
+      final now = DateTime.now().toIso8601String();
+      await txn.insert('transactions', {
+        'type': 'expense',
+        'amount': bill.amount,
+        'description': bill.name,
+        'category': bill.category,
+        'transaction_date': now,
+        'notes': 'Conta paga',
+        'created_at': now,
+        'updated_at': now,
+      });
+
+      final nextDate = _nextDate(bill.dueDate, bill.recurrence);
+      if (nextDate != null) {
+        final next = Bill(
+          name: bill.name,
+          amount: bill.amount,
+          dueDate: nextDate,
+          category: bill.category,
+          recurrence: bill.recurrence,
+          reminderDays: bill.reminderDays,
+          notes: bill.notes,
+        );
+        nextId = await txn.insert('bills', next.toMap());
+        nextBill = _withId(next, nextId!);
+      }
+    });
+
+    await BillReminderService.instance.cancel(bill.id!);
+    if (nextBill != null) {
+      await BillReminderService.instance.sync(nextBill!);
+    }
+  }
+
+  Bill _withId(Bill bill, int id) => Bill(
+    id: id,
+    name: bill.name,
+    amount: bill.amount,
+    dueDate: bill.dueDate,
+    category: bill.category,
+    recurrence: bill.recurrence,
+    reminderDays: bill.reminderDays,
+    status: bill.status,
+    notes: bill.notes,
+  );
+
+  DateTime? _nextDate(DateTime date, String recurrence) {
+    switch (recurrence) {
+      case 'weekly':
+        return date.add(const Duration(days: 7));
+      case 'monthly':
+        return DateTime(date.year, date.month + 1, date.day);
+      case 'yearly':
+        return DateTime(date.year + 1, date.month, date.day);
+      default:
+        return null;
+    }
+  }
+
+  Future<Map<String, int>> counts() async {
+    final bills = await list();
+    final today = DateTime.now();
+    final current = DateTime(today.year, today.month, today.day);
+    int overdue = 0;
+    int todayCount = 0;
+
+    for (final bill in bills) {
+      final due = DateTime(
+        bill.dueDate.year,
+        bill.dueDate.month,
+        bill.dueDate.day,
+      );
+      if (due.isBefore(current)) overdue++;
+      if (due == current) todayCount++;
+    }
+
+    return {
+      'pending': bills.length,
+      'overdue': overdue,
+      'today': todayCount,
+    };
+  }
+}
+
