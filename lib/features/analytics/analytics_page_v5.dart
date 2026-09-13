@@ -18,6 +18,13 @@ class _AnalyticsPageV5State extends State<AnalyticsPageV5> {
   PeriodFilter _filter = PeriodFilter.month;
   DateTime? _customStart;
   DateTime? _customEnd;
+  late Future<FinanceAnalytics> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _load();
+  }
 
   FinanceDateRange get _range => FinanceDateRange.fromFilter(
     _filter,
@@ -25,7 +32,15 @@ class _AnalyticsPageV5State extends State<AnalyticsPageV5> {
     customEnd: _customEnd,
   );
 
-  Future<void> _selectCustomRange() async {
+  Future<FinanceAnalytics> _load() =>
+      FinanceAnalyticsRepository.instance.load(_range);
+
+  void _reload() {
+    setState(() => _future = _load());
+  }
+
+  /// Retorna `true` quando um intervalo personalizado válido foi escolhido.
+  Future<bool> _selectCustomRange() async {
     final result = await showDateRangePicker(
       context: context,
       firstDate: DateTime(2020),
@@ -35,36 +50,63 @@ class _AnalyticsPageV5State extends State<AnalyticsPageV5> {
         end: _customEnd ?? DateTime.now(),
       ),
     );
-    if (result != null) {
-      setState(() {
-        _customStart = result.start;
-        _customEnd = result.end;
-      });
+    if (result == null) return false;
+    setState(() {
+      _customStart = result.start;
+      _customEnd = result.end;
+    });
+    return true;
+  }
+
+  Future<void> _onFilterChanged(PeriodFilter value) async {
+    if (value == PeriodFilter.custom) {
+      // Só aplica o filtro personalizado se o usuário confirmar um intervalo.
+      // Ao cancelar, mantém o período anterior, evitando DateRange inválido.
+      final selected = await _selectCustomRange();
+      if (!selected) return;
     }
+    setState(() {
+      _filter = value;
+      _future = _load();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<FinanceAnalytics>(
-      future: FinanceAnalyticsRepository.instance.load(_range),
+      future: _future,
       builder: (context, snapshot) {
         final data = snapshot.data;
         return RefreshIndicator(
-          onRefresh: () async => setState(() {}),
+          onRefresh: () async => _reload(),
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
               PeriodSelector(
                 selected: _filter,
-                onChanged: (value) async {
-                  setState(() => _filter = value);
-                  if (value == PeriodFilter.custom) await _selectCustomRange();
-                },
+                onChanged: _onFilterChanged,
               ),
               if (snapshot.connectionState == ConnectionState.waiting)
                 const Padding(
                   padding: EdgeInsets.all(50),
                   child: Center(child: CircularProgressIndicator()),
+                )
+              else if (snapshot.hasError)
+                Padding(
+                  padding: const EdgeInsets.all(40),
+                  child: Column(
+                    children: [
+                      const Text(
+                        'Não foi possível carregar as análises.',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton(
+                        onPressed: _reload,
+                        child: const Text('TENTAR NOVAMENTE'),
+                      ),
+                    ],
+                  ),
                 )
               else if (data != null) ...[
                 const SizedBox(height: 16),
