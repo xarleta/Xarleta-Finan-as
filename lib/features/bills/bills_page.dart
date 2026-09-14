@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../../core/state/data_change_listener.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import 'bill_form_page.dart';
 import 'data/bill_repository.dart';
 import 'domain/bill_model.dart';
+import 'widgets/bill_card.dart';
 
 class BillsPage extends StatefulWidget {
   const BillsPage({super.key});
@@ -13,15 +15,14 @@ class BillsPage extends StatefulWidget {
   State<BillsPage> createState() => _BillsPageState();
 }
 
-class _BillsPageState extends State<BillsPage> {
-  late Future<List<Bill>> _billsFuture;
-  late Future<Map<String, int>> _countsFuture;
+class _BillsPageState extends State<BillsPage>
+    with DataChangeListenerMixin {
+  late Future<List<PendingItem>> _billsFuture;
 
   @override
   void initState() {
     super.initState();
-    _billsFuture = BillRepository.instance.list();
-    _countsFuture = BillRepository.instance.counts();
+    _billsFuture = BillRepository.instance.listPending();
   }
 
   Future<void> _refresh() async {
@@ -30,10 +31,19 @@ class _BillsPageState extends State<BillsPage> {
     // verificação mantém o comportamento quando a tela está viva.
     if (!mounted) return;
     setState(() {
-      _billsFuture = BillRepository.instance.list();
-      _countsFuture = BillRepository.instance.counts();
+      _billsFuture = BillRepository.instance.listPending();
     });
     await _billsFuture;
+  }
+
+  @override
+  void onDataChanged() {
+    // Recarrega contas e contadores quando qualquer repositório sinaliza uma
+    // escrita (ex.: lançamento pago em outra tela). O post frame evita
+    // `setState` durante o build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _refresh();
+    });
   }
 
   @override
@@ -42,7 +52,7 @@ class _BillsPageState extends State<BillsPage> {
       appBar: AppBar(
         title: const Text('Contas e vencimentos'),
       ),
-      body: FutureBuilder<List<Bill>>(
+      body: FutureBuilder<List<PendingItem>>(
         future: _billsFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -74,10 +84,13 @@ class _BillsPageState extends State<BillsPage> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                FutureBuilder<Map<String, int>>(
-                  future: _countsFuture,
-                  builder: (_, countSnapshot) {
-                    final counts = countSnapshot.data ?? {};
+                // Os contadores são derivados da lista já carregada acima.
+                // Antes havia um segundo FutureBuilder que refazia a mesma
+                // consulta de pendentes no banco (BUG 5 - consulta duplicada).
+                Builder(
+                  builder: (_) {
+                    final counts =
+                        BillRepository.instance.countsFromItems(items);
 
                     return Row(
                       children: [
@@ -119,8 +132,14 @@ class _BillsPageState extends State<BillsPage> {
                     ),
                   ),
                 ...items.map(
-                  (bill) => _BillTile(
-                    bill: bill,
+                  (item) => _BillTile(
+                    // A chave por origem+id garante que o Flutter associe o
+                    // estado correto a cada item após o recarregamento. Sem
+                    // ela, o estado (ex.: `_paying`) podia ser reaproveitado
+                    // pela posição, dando a impressão de que o PAGAR/RECEBER
+                    // não teve efeito.
+                    key: ValueKey('${item.source.name}-${item.sourceId}'),
+                    item: item,
                     onChanged: _refresh,
                   ),
                 ),
@@ -189,11 +208,12 @@ class _Count extends StatelessWidget {
 }
 
 class _BillTile extends StatefulWidget {
-  final Bill bill;
+  final PendingItem item;
   final Future<void> Function() onChanged;
 
   const _BillTile({
-    required this.bill,
+    super.key,
+    required this.item,
     required this.onChanged,
   });
 
@@ -204,7 +224,8 @@ class _BillTile extends StatefulWidget {
 class _BillTileState extends State<_BillTile> {
   bool _paying = false;
 
-  Bill get bill => widget.bill;
+  PendingItem get item => widget.item;
+  Bill get bill => widget.item.bill;
 
   String _recurrenceText(String recurrence) {
     switch (recurrence) {
@@ -225,6 +246,19 @@ class _BillTileState extends State<_BillTile> {
 
       default:
         return recurrence;
+    }
+  }
+
+  /// Rótulo da origem do item, exibido no subtítulo para deixar claro de onde
+  /// ele vem (conta recorrente, parcelamento ou lançamento futuro).
+  String get _sourceLabel {
+    switch (item.source) {
+      case BillSource.bill:
+        return _recurrenceText(bill.recurrence);
+      case BillSource.installment:
+        return 'Parcelamento';
+      case BillSource.transaction:
+        return 'Lançamento futuro';
     }
   }
 
@@ -263,7 +297,7 @@ class _BillTileState extends State<_BillTile> {
 
     setState(() => _paying = true);
     try {
-      final paid = await BillRepository.instance.markPaid(bill);
+      final paid = await BillRepository.instance.markPendingPaid(item);
       await widget.onChanged();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -285,7 +319,7 @@ class _BillTileState extends State<_BillTile> {
     }
   }
 
-  Future<void> _deleteBill(BuildContext context) async {
+  Future<void> _delete(BuildContext context) async {
     final isIncome = bill.isIncome;
 
     final confirmed = await showDialog<bool>(
@@ -293,7 +327,7 @@ class _BillTileState extends State<_BillTile> {
       builder: (dialogContext) {
         return AlertDialog(
           title: Text(
-            isIncome ? 'Excluir receita recorrente' : 'Excluir conta',
+            isIncome ? 'Excluir receita' : 'Excluir conta',
           ),
           content: Text(
             'Deseja realmente excluir "${bill.name}"?',
@@ -317,7 +351,7 @@ class _BillTileState extends State<_BillTile> {
     );
 
     if (confirmed == true) {
-      await BillRepository.instance.delete(bill.id!);
+      await BillRepository.instance.deletePending(item);
 
       await widget.onChanged();
 
@@ -325,7 +359,7 @@ class _BillTileState extends State<_BillTile> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              isIncome ? 'Receita recorrente excluída.' : 'Conta excluída.',
+              isIncome ? 'Receita excluída.' : 'Conta excluída.',
             ),
           ),
         );
@@ -351,65 +385,32 @@ class _BillTileState extends State<_BillTile> {
 
     final overdue = dueDate.isBefore(today);
 
-    final isIncome = bill.isIncome;
+    return BillCard(
+      item: item,
+      sourceLabel: _sourceLabel,
+      overdue: overdue,
+      paying: _paying,
+      onPay: _pay,
+      onDelete: () => _delete(context),
+      onTap: () async {
+        // Apenas contas recorrentes possuem formulário próprio. Itens de
+        // parcelamento e lançamentos futuros são gerenciados nas suas telas
+        // de origem (Parcelamentos e Ganhos e gastos).
+        if (item.source != BillSource.bill) return;
 
-    return Card(
-      child: ListTile(
-        leading: CircleAvatar(
-          child: Icon(
-            overdue
-                ? Icons.warning_amber_rounded
-                : (isIncome ? Icons.arrow_downward : Icons.receipt_long),
-            color: overdue
-                ? AppTheme.negative
-                : (isIncome ? AppTheme.positive : null),
+        final changed = await Navigator.push<bool>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => BillFormPage(
+              initial: bill,
+            ),
           ),
-        ),
-        title: Text(bill.name),
-        subtitle: Text(
-          '${dateText(bill.dueDate)} • ${_recurrenceText(bill.recurrence)}'
-          '${isIncome ? ' • Receita' : ''}',
-        ),
-        trailing: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              money(bill.amount),
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: isIncome ? AppTheme.positive : null,
-              ),
-            ),
-            TextButton(
-              onPressed: _paying ? null : _pay,
-              child: _paying
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text(isIncome ? 'RECEBER' : 'PAGAR'),
-            ),
-          ],
-        ),
-        onTap: () async {
-          final changed = await Navigator.push<bool>(
-            context,
-            MaterialPageRoute(
-              builder: (_) => BillFormPage(
-                initial: bill,
-              ),
-            ),
-          );
+        );
 
-          if (changed == true) {
-            await widget.onChanged();
-          }
-        },
-        onLongPress: () {
-          _deleteBill(context);
-        },
-      ),
+        if (changed == true) {
+          await widget.onChanged();
+        }
+      },
     );
   }
 }
