@@ -4,35 +4,48 @@
 #
 # ## Por que este script existe
 #
-# O `flutter test` executa cada arquivo de teste em um isolate próprio, em
-# paralelo, usando por padrão o número de núcleos lógicos da máquina como
-# limite de concorrência. Em máquinas com muitos núcleos (ex.: 12), todos os
-# arquivos de teste são iniciados simultaneamente.
-#
-# Cada isolate precisa carregar a biblioteca nativa do SQLite (`sqlite3.dll` no
-# Windows, `libsqlite3.so` no Linux) na primeira chamada a `sqfliteFfiInit()`.
-# Quando muitos isolates carregam a biblioteca nativa ao mesmo tempo, o
-# carregamento concorre e o runner derruba isolates, produzindo falhas
-# aleatórias como:
+# O `flutter test` executa cada arquivo de teste em um isolate próprio. Cada
+# isolate que usa `sqflite_common_ffi` precisa carregar a biblioteca nativa do
+# SQLite (`sqlite3.dll` no Windows, `libsqlite3.so` no Linux) na primeira
+# chamada a `sqfliteFfiInit()`. Nesta combinação (Flutter 3.47.4 / Dart 3.13.3 /
+# sqflite_common_ffi 2.4.3 / sqlite3 3.5.2 / Windows x64) esse carregamento é
+# instável e o runner derruba isolates de forma aleatória, produzindo falhas
+# como:
 #
 #     Failed to load "...": Connection closed before test suite loaded.
 #     ... did not complete [E]
 #
-# Essas falhas não estão relacionadas à lógica dos testes: o mesmo teste passa
-# ou falha de forma não determinística, e até arquivos de teste puramente Dart
-# (sem SQLite) são afetados, o que comprova que a origem é o esgotamento de
-# recursos do runner sob paralelismo máximo.
+# ## Evidência (investigação de 2026-09-13)
+#
+# A causa NÃO é o código do projeto nem o paralelismo:
+#
+# 1. Um projeto Flutter mínimo, criado fora deste repositório, contendo apenas
+#    `flutter_test` + `sqflite_common_ffi` (sem nenhum código do Xarelta
+#    Finanças), reproduziu as MESMAS falhas: 3 falhas em 14 execuções de
+#    `flutter test` com concorrência padrão.
+# 2. As falhas ocorrem também com `--concurrency=1` (1 falha em 5 execuções) e
+#    com `--concurrency=2` (1 falha em 3 execuções), ou seja, NÃO dependem de
+#    paralelismo.
+# 3. Os arquivos que falham variam a cada execução (database_migration,
+#    notification_service, payment_duplicate, category_repository, ...), o que
+#    descarta um teste específico como causa.
+# 4. Arquivos de teste puramente Dart (sem SQLite) nunca falharam.
+# 5. Os singletons do projeto (AppDatabase e repositórios) são por isolate e
+#    cada arquivo usa um diretório temporário exclusivo, portanto não há
+#    estado compartilhado entre arquivos de teste.
+#
+# Conclusão: a origem é externa ao projeto (carregamento da biblioteca nativa
+# do SQLite pelo `sqflite_common_ffi` sob o test runner do Flutter no Windows).
 #
 # ## O que este script faz
 #
-# Limita a concorrência a um valor que a máquina sustenta com folga. Os testes
-# continuam executando em paralelo (não é `--concurrency=1`), apenas em uma
-# quantidade que evita a corrida no carregamento da biblioteca nativa e o
-# esgotamento de recursos do runner.
+# Limita a concorrência para reduzir a probabilidade da falha. Isso NÃO elimina
+# o problema: é uma mitigação, não uma correção. Se uma execução falhar com
+# "Connection closed before test suite loaded" ou "did not complete", basta
+# reexecutar; a falha não indica defeito no código.
 #
-# O valor 2 foi escolhido empiricamente: com 4 ainda ocorreram falhas
-# esporádicas de carregamento de isolate nesta máquina (12 núcleos lógicos),
-# enquanto 2 se mostrou estável em execuções consecutivas da suíte completa.
+# O valor 2 foi escolhido empiricamente por apresentar a menor taxa de falha
+# observada nesta máquina (12 núcleos lógicos).
 #
 # Uso:
 #     ./tool/test.sh                -> suíte completa

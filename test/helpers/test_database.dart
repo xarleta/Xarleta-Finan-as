@@ -8,15 +8,20 @@ import 'package:xarleta_financas/core/database/app_database.dart';
 ///
 /// Motivação (causa raiz da instabilidade):
 ///
-/// O `flutter test` executa cada arquivo de teste em um isolate próprio, em
-/// paralelo. O `sqflite_common_ffi` inicializa a biblioteca nativa do SQLite
+/// O `flutter test` executa cada arquivo de teste em um isolate próprio. O
+/// `sqflite_common_ffi` inicializa a biblioteca nativa do SQLite
 /// (`sqlite3.dll` no Windows) através de `sqfliteFfiInit()`, que por sua vez
 /// executa `sqlite3.openInMemory().close()` para forçar o carregamento da
-/// biblioteca no isolate atual. Quando vários isolates fazem isso ao mesmo
-/// tempo, o carregamento nativo concorre e o isolate é encerrado abruptamente,
-/// produzindo o erro:
+/// biblioteca no isolate atual. Nesta combinação (Flutter 3.47.4 / Dart 3.13.3
+/// / sqflite_common_ffi 2.4.3 / sqlite3 3.5.2 / Windows x64) esse carregamento
+/// é instável e o isolate pode ser encerrado abruptamente, produzindo o erro:
 ///
 ///     Failed to load "...": Connection closed before test suite loaded.
+///
+/// Investigação de 2026-09-13: a falha NÃO depende de paralelismo. Ela foi
+/// reproduzida com `--concurrency=1` e `--concurrency=2` e também em um projeto
+/// Flutter mínimo (apenas `flutter_test` + `sqflite_common_ffi`, sem código
+/// deste repositório), o que confirma que a origem é externa ao projeto.
 ///
 /// Este helper centraliza a inicialização para que todos os arquivos de teste
 /// usem exatamente o mesmo procedimento, evitando divergências e garantindo
