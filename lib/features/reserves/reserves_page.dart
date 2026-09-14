@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../core/database/app_database.dart';
+import '../../core/state/data_change_listener.dart';
+import '../../core/state/data_change_notifier.dart';
 import '../../core/utils/formatters.dart';
 
 class ReservesPage extends StatefulWidget {
@@ -10,7 +12,8 @@ class ReservesPage extends StatefulWidget {
   State<ReservesPage> createState() => _ReservesPageState();
 }
 
-class _ReservesPageState extends State<ReservesPage> {
+class _ReservesPageState extends State<ReservesPage>
+    with DataChangeListenerMixin {
   late Future<List<Map<String, Object?>>> _reservesFuture;
 
   @override
@@ -20,8 +23,18 @@ class _ReservesPageState extends State<ReservesPage> {
   }
 
   Future<void> _refresh() async {
+    if (!mounted) return;
     setState(() => _reservesFuture = load());
     await _reservesFuture;
+  }
+
+  @override
+  void onDataChanged() {
+    // Recarrega as reservas quando qualquer repositório sinaliza uma escrita.
+    // O post frame evita `setState` durante o build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _refresh();
+    });
   }
 
   Future<List<Map<String, Object?>>> load() async {
@@ -87,6 +100,9 @@ class _ReservesPageState extends State<ReservesPage> {
           'notes': null,
         },
       );
+
+      // Notifica as demais telas para que a nova reserva apareça imediatamente.
+      DataChangeNotifier.instance.notifyChanged();
 
       await _refresh();
     }
@@ -180,6 +196,9 @@ class _ReservesPageState extends State<ReservesPage> {
         );
       });
 
+      // Propaga a movimentação (depósito/retirada) para as telas dependentes.
+      DataChangeNotifier.instance.notifyChanged();
+
       await _refresh();
     }
 
@@ -245,6 +264,9 @@ class _ReservesPageState extends State<ReservesPage> {
         whereArgs: [reserve['id']],
       );
 
+      // Propaga a edição da reserva para as telas dependentes.
+      DataChangeNotifier.instance.notifyChanged();
+
       await _refresh();
     }
 
@@ -292,6 +314,9 @@ class _ReservesPageState extends State<ReservesPage> {
         whereArgs: [reserve['id']],
       );
     });
+
+    // Propaga a remoção da reserva para as telas dependentes.
+    DataChangeNotifier.instance.notifyChanged();
 
     await _refresh();
   }

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/database/app_database.dart';
+import '../../core/state/data_change_listener.dart';
+import '../../core/state/data_change_notifier.dart';
 import '../../core/utils/formatters.dart';
 
 class GoalsPage extends StatefulWidget {
@@ -9,7 +11,8 @@ class GoalsPage extends StatefulWidget {
   State<GoalsPage> createState() => _GoalsPageState();
 }
 
-class _GoalsPageState extends State<GoalsPage> {
+class _GoalsPageState extends State<GoalsPage>
+    with DataChangeListenerMixin {
   late Future<List<Map<String, Object?>>> _goalsFuture;
 
   @override
@@ -19,8 +22,18 @@ class _GoalsPageState extends State<GoalsPage> {
   }
 
   Future<void> _refresh() async {
+    if (!mounted) return;
     setState(() => _goalsFuture = load());
     await _goalsFuture;
+  }
+
+  @override
+  void onDataChanged() {
+    // Recarrega as metas quando qualquer repositório sinaliza uma escrita.
+    // O post frame evita `setState` durante o build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _refresh();
+    });
   }
 
   Future<List<Map<String, Object?>>> load() async {
@@ -109,6 +122,9 @@ class _GoalsPageState extends State<GoalsPage> {
         },
       );
 
+      // Notifica as demais telas para que a nova meta apareça imediatamente.
+      DataChangeNotifier.instance.notifyChanged();
+
       await _refresh();
     }
 
@@ -168,6 +184,9 @@ class _GoalsPageState extends State<GoalsPage> {
           },
         );
       });
+
+      // Propaga o novo valor da meta para as telas dependentes.
+      DataChangeNotifier.instance.notifyChanged();
 
       await _refresh();
     }
@@ -256,6 +275,9 @@ class _GoalsPageState extends State<GoalsPage> {
         whereArgs: [g['id']],
       );
 
+      // Propaga a edição da meta para as telas dependentes.
+      DataChangeNotifier.instance.notifyChanged();
+
       await _refresh();
     }
 
@@ -296,6 +318,9 @@ class _GoalsPageState extends State<GoalsPage> {
       where: 'id=?',
       whereArgs: [g['id']],
     );
+
+    // Propaga a remoção da meta para as telas dependentes.
+    DataChangeNotifier.instance.notifyChanged();
 
     await _refresh();
   }

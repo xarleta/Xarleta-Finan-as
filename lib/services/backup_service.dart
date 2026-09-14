@@ -1,5 +1,6 @@
 import 'dart:convert';
 import '../core/database/app_database.dart';
+import '../core/state/data_change_notifier.dart';
 
 class BackupService {
   BackupService._();
@@ -75,6 +76,10 @@ class BackupService {
         }
       }
     });
+
+    // Após restaurar, todas as telas precisam refletir os dados do backup
+    // imediatamente, sem exigir fechar e reabrir o aplicativo.
+    DataChangeNotifier.instance.notifyChanged();
   }
 }
 

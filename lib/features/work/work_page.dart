@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/database/app_database.dart';
+import '../../core/state/data_change_listener.dart';
+import '../../core/state/data_change_notifier.dart';
 import '../../core/utils/formatters.dart';
 
 class WorkPage extends StatefulWidget {
@@ -8,7 +10,8 @@ class WorkPage extends StatefulWidget {
   State<WorkPage> createState() => _WorkPageState();
 }
 
-class _WorkPageState extends State<WorkPage> {
+class _WorkPageState extends State<WorkPage>
+    with DataChangeListenerMixin {
   late Future<List<Map<String, Object?>>> _sessionsFuture;
 
   @override
@@ -20,6 +23,15 @@ class _WorkPageState extends State<WorkPage> {
   Future<List<Map<String, Object?>>> _load() async {
     final db = await AppDatabase.instance.database;
     return db.query('work_sessions', orderBy: 'session_date DESC, id DESC');
+  }
+
+  @override
+  void onDataChanged() {
+    // Recarrega as sessões quando qualquer repositório sinaliza uma escrita.
+    // O post frame evita `setState` durante o build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _sessionsFuture = _load());
+    });
   }
 
   /// Exclui uma sessão de trabalho após confirmação do usuário.
@@ -52,6 +64,9 @@ class _WorkPageState extends State<WorkPage> {
       where: 'id = ?',
       whereArgs: [session['id']],
     );
+
+    // Propaga a exclusão para as telas dependentes (ex.: dashboard).
+    DataChangeNotifier.instance.notifyChanged();
 
     if (!mounted) return;
     setState(() => _sessionsFuture = _load());
@@ -236,6 +251,10 @@ class _WorkFormPageState extends State<WorkFormPage> {
       'kilometers': parseBrazilianNumber(km.text),
       'notes': null,
     });
+
+    // Notifica as demais telas para que a nova sessão apareça imediatamente.
+    DataChangeNotifier.instance.notifyChanged();
+
     if (mounted) Navigator.pop(context);
   }
 }

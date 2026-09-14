@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/database/app_database.dart';
+import '../../core/state/data_change_listener.dart';
+import '../../core/state/data_change_notifier.dart';
 
 class CategoriesPage extends StatefulWidget {
   const CategoriesPage({super.key});
@@ -8,7 +10,8 @@ class CategoriesPage extends StatefulWidget {
   State<CategoriesPage> createState() => _CategoriesPageState();
 }
 
-class _CategoriesPageState extends State<CategoriesPage> {
+class _CategoriesPageState extends State<CategoriesPage>
+    with DataChangeListenerMixin {
   String type = 'expense';
   late Future<List<Map<String, Object?>>> _categoriesFuture;
 
@@ -19,8 +22,18 @@ class _CategoriesPageState extends State<CategoriesPage> {
   }
 
   Future<void> _refresh() async {
+    if (!mounted) return;
     setState(() => _categoriesFuture = load());
     await _categoriesFuture;
+  }
+
+  @override
+  void onDataChanged() {
+    // Recarrega as categorias quando qualquer repositório sinaliza uma escrita.
+    // O post frame evita `setState` durante o build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _refresh();
+    });
   }
 
   Future<List<Map<String, Object?>>> load() async {
@@ -72,6 +85,10 @@ class _CategoriesPageState extends State<CategoriesPage> {
             'active': 1,
           },
         );
+
+        // Notifica as demais telas (formulários, dashboard) para que a nova
+        // categoria apareça imediatamente, sem precisar sair e voltar.
+        DataChangeNotifier.instance.notifyChanged();
 
         if (mounted) {
           await _refresh();
@@ -133,6 +150,9 @@ class _CategoriesPageState extends State<CategoriesPage> {
           where: 'id=?',
           whereArgs: [row['id']],
         );
+
+        // Propaga a edição para as telas que exibem categorias.
+        DataChangeNotifier.instance.notifyChanged();
 
         if (mounted) {
           await _refresh();
@@ -198,6 +218,9 @@ class _CategoriesPageState extends State<CategoriesPage> {
         where: 'id=?',
         whereArgs: [row['id']],
       );
+
+      // Propaga a remoção para as telas que listam categorias.
+      DataChangeNotifier.instance.notifyChanged();
 
       if (mounted) {
         await _refresh();
