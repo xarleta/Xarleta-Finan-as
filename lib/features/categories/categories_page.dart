@@ -30,10 +30,9 @@ class _CategoriesPageState extends State<CategoriesPage>
   @override
   void onDataChanged() {
     // Recarrega as categorias quando qualquer repositório sinaliza uma escrita.
-    // O post frame evita `setState` durante o build.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _refresh();
-    });
+    // O agendamento para o próximo frame e a filtragem de telas não visíveis são
+    // feitos pelo `DataChangeListenerMixin`.
+    _refresh();
   }
 
   Future<List<Map<String, Object?>>> load() async {

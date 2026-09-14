@@ -425,17 +425,51 @@ class BillRepository {
   }
 
   /// Exclui um item unificado na sua tabela de origem.
+  ///
+  /// A exclusão é aplicada na tabela de origem e, quando a origem possui
+  /// transações derivadas (parcelas já pagas de um parcelamento), essas também
+  /// são removidas na mesma transação de banco. Sem isso, o item desaparecia de
+  /// "Contas e vencimentos" mas permanecia em "Ganhos e gastos" como dado
+  /// órfão — exatamente o sintoma de dessincronização relatado (BUG 2).
   Future<void> deletePending(PendingItem item) async {
     switch (item.source) {
       case BillSource.bill:
+        // `delete` já remove a conta e notifica as telas.
         await delete(item.sourceId);
       case BillSource.installment:
         final db = await AppDatabase.instance.database;
-        await db.delete('installments', where: 'id = ?', whereArgs: [item.sourceId]);
+        await db.transaction((txn) async {
+          // Remove as transações geradas pelas parcelas já pagas deste
+          // parcelamento, identificadas pela descrição "Nome (n/total)".
+          final rows = await txn.query(
+            'installments',
+            columns: ['name', 'total_installments'],
+            where: 'id = ?',
+            whereArgs: [item.sourceId],
+            limit: 1,
+          );
+          if (rows.isNotEmpty) {
+            final name = rows.first['name'] as String;
+            final total = (rows.first['total_installments'] as num).toInt();
+            for (var n = 1; n <= total; n++) {
+              await txn.delete(
+                'transactions',
+                where: 'description = ?',
+                whereArgs: ['$name ($n/$total)'],
+              );
+            }
+          }
+          await txn.delete(
+            'installments',
+            where: 'id = ?',
+            whereArgs: [item.sourceId],
+          );
+        });
         DataChangeNotifier.instance.notifyChanged();
       case BillSource.transaction:
         final db = await AppDatabase.instance.database;
-        await db.delete('transactions', where: 'id = ?', whereArgs: [item.sourceId]);
+        await db.delete('transactions',
+            where: 'id = ?', whereArgs: [item.sourceId]);
         DataChangeNotifier.instance.notifyChanged();
     }
   }

@@ -35,10 +35,9 @@ class _InstallmentsPageState extends State<InstallmentsPage>
   @override
   void onDataChanged() {
     // Recarrega os parcelamentos quando qualquer repositório sinaliza uma
-    // escrita. O post frame evita `setState` durante o build.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) refresh();
-    });
+    // escrita. O agendamento para o próximo frame e a filtragem de telas não
+    // visíveis são feitos pelo `DataChangeListenerMixin`.
+    refresh();
   }
 
   @override

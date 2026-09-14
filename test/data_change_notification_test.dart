@@ -1,5 +1,8 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xarleta_financas/core/database/app_database.dart';
+import 'package:xarleta_financas/core/state/app_route_observer.dart';
+import 'package:xarleta_financas/core/state/data_change_listener.dart';
 import 'package:xarleta_financas/core/state/data_change_notifier.dart';
 import 'package:xarleta_financas/features/bills/data/bill_repository.dart';
 import 'package:xarleta_financas/features/bills/domain/bill_model.dart';
@@ -526,4 +529,205 @@ void main() {
       expect(count, greaterThanOrEqualTo(1));
     });
   });
+
+  group('DataChangeListenerMixin — coalescência e visibilidade (BUG 6)', () {
+    testWidgets(
+      'várias notificações no mesmo frame geram uma única recarga',
+      (tester) async {
+        final harness = _ListenerHarness();
+        await tester.pumpWidget(harness.build());
+
+        // Três notificações seguidas, antes de qualquer frame.
+        DataChangeNotifier.instance.notifyChanged();
+        DataChangeNotifier.instance.notifyChanged();
+        DataChangeNotifier.instance.notifyChanged();
+
+        await tester.pump();
+
+        expect(harness.reloads, 1,
+            reason: 'notificações no mesmo frame devem ser coalescidas em '
+                'uma única recarga (evita consultas duplicadas)');
+      },
+    );
+
+    testWidgets(
+      'notificações em frames distintos geram recargas distintas',
+      (tester) async {
+        final harness = _ListenerHarness();
+        await tester.pumpWidget(harness.build());
+
+        // A recarga é adiada para fora do ciclo de build. O mixin libera a flag
+        // de coalescência via `scheduleMicrotask`, então um único `pump()`
+        // processa a recarga pendente.
+        DataChangeNotifier.instance.notifyChanged();
+        await tester.pump();
+        expect(harness.reloads, 1,
+            reason: 'a primeira notificação deve gerar uma recarga');
+
+        DataChangeNotifier.instance.notifyChanged();
+        await tester.pump();
+
+        expect(harness.reloads, 2,
+            reason: 'uma nova notificação em outro frame deve gerar nova '
+                'recarga');
+      },
+    );
+
+    testWidgets(
+      'a flag de coalescência é liberada mesmo sem novo frame '
+      '(evita tela travada sem recarregar)',
+      (tester) async {
+        final harness = _ListenerHarness();
+        await tester.pumpWidget(harness.build());
+
+        // Notifica várias vezes sem bombear frames entre as chamadas. A
+        // primeira agenda a recarga; as seguintes são coalescidas. Após o
+        // processamento, a flag precisa estar liberada para que uma nova
+        // notificação volte a recarregar.
+        DataChangeNotifier.instance.notifyChanged();
+        DataChangeNotifier.instance.notifyChanged();
+        await tester.pump();
+        expect(harness.reloads, 1);
+
+        DataChangeNotifier.instance.notifyChanged();
+        await tester.pump();
+        expect(harness.reloads, 2,
+            reason: 'a flag não pode ficar presa após a primeira recarga');
+      },
+    );
+
+    testWidgets(
+      'tela não visível (empilhada atrás de outra rota) não recarrega',
+      (tester) async {
+        final harness = _ListenerHarness();
+        await tester.pumpWidget(harness.build());
+        expect(harness.reloads, 0);
+
+        // Empilha uma segunda rota por cima: a tela do harness deixa de ser a
+        // rota atual.
+        final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+        navigator.push(
+          MaterialPageRoute<void>(
+            builder: (_) => const Scaffold(body: Text('outra tela')),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        DataChangeNotifier.instance.notifyChanged();
+        await tester.pump();
+
+        expect(harness.reloads, 0,
+            reason: 'telas em segundo plano não devem recarregar');
+      },
+    );
+
+    testWidgets(
+      'listener é removido ao desmontar (sem vazamento)',
+      (tester) async {
+        final harness = _ListenerHarness();
+        await tester.pumpWidget(harness.build());
+
+        // Substitui a árvore por outra tela, desmontando o harness.
+        await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+        await tester.pump();
+
+        // Notificar após o dispose não deve lançar nem recarregar.
+        DataChangeNotifier.instance.notifyChanged();
+        await tester.pump();
+
+        expect(harness.reloads, 0);
+      },
+    );
+
+    testWidgets(
+      'recarga adiada por rota coberta é aplicada ao voltar a ser visível '
+      '(PAGAR/RECEBER com diálogo aberto)',
+      (tester) async {
+        final harness = _ListenerHarness();
+        await tester.pumpWidget(harness.build());
+        expect(harness.reloads, 0);
+
+        // Abre um diálogo: a rota do harness deixa de ser a atual, exatamente
+        // como acontece ao confirmar PAGAR/RECEBER.
+        final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+        navigator.push(
+          MaterialPageRoute<void>(
+            builder: (_) => const Scaffold(body: Text('diálogo')),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Uma escrita no banco acontece enquanto a tela está coberta.
+        DataChangeNotifier.instance.notifyChanged();
+        await tester.pump();
+        expect(harness.reloads, 0,
+            reason: 'a tela coberta não deve recarregar imediatamente');
+
+        // Fecha a rota de cima: o harness volta a ser a rota atual.
+        navigator.pop();
+        await tester.pumpAndSettle();
+
+        expect(harness.reloads, 1,
+            reason: 'a recarga adiada deve ser aplicada assim que a tela '
+                'volta a ser visível — sem isso, PAGAR/RECEBER pareceria '
+                'não ter efeito');
+      },
+    );
+
+    testWidgets(
+      'sem escrita durante a cobertura, voltar a ser visível não recarrega',
+      (tester) async {
+        final harness = _ListenerHarness();
+        await tester.pumpWidget(harness.build());
+
+        final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+        navigator.push(
+          MaterialPageRoute<void>(
+            builder: (_) => const Scaffold(body: Text('outra tela')),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Nenhuma notificação enquanto coberta.
+        navigator.pop();
+        await tester.pumpAndSettle();
+
+        expect(harness.reloads, 0,
+            reason: 'sem escrita pendente, não deve haver recarga extra');
+      },
+    );
+  });
+}
+
+/// Harness de teste para exercitar o [DataChangeListenerMixin] sem depender de
+/// uma tela real do aplicativo.
+class _ListenerHarness {
+  int reloads = 0;
+
+  Widget build() {
+    return MaterialApp(
+      // O mesmo observador usado pelo app real: sem ele, o mixin não recebe
+      // `didPopNext` e a recarga adiada por rota coberta não seria aplicada.
+      navigatorObservers: [appRouteObserver],
+      home: _ListenerProbe(onReload: () => reloads++),
+    );
+  }
+}
+
+class _ListenerProbe extends StatefulWidget {
+  const _ListenerProbe({required this.onReload});
+
+  final VoidCallback onReload;
+
+  @override
+  State<_ListenerProbe> createState() => _ListenerProbeState();
+}
+
+class _ListenerProbeState extends State<_ListenerProbe>
+    with DataChangeListenerMixin {
+  @override
+  void onDataChanged() => widget.onReload();
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(body: Text('probe'));
 }

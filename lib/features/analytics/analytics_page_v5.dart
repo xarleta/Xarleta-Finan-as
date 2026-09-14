@@ -44,11 +44,10 @@ class _AnalyticsPageV5State extends State<AnalyticsPageV5>
 
   @override
   void onDataChanged() {
-    // Recarrega as análises quando qualquer repositório sinaliza uma escrita.
-    // O post frame evita `setState` durante o build.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _reload();
-    });
+    // Recarrega as análises quando qualquer repositório sinaliza uma escrita. O
+    // agendamento para o próximo frame e a filtragem de telas não visíveis são
+    // feitos pelo `DataChangeListenerMixin`.
+    _reload();
   }
 
   /// Retorna `true` quando um intervalo personalizado válido foi escolhido.

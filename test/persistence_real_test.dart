@@ -440,6 +440,124 @@ void main() {
       expect(rows, isEmpty);
     });
 
+    test(
+      'excluir parcelamento remove as transações das parcelas já pagas '
+      '(BUG 2 — sem dado órfão em Ganhos e gastos)',
+      () async {
+        final db = await AppDatabase.instance.database;
+
+        await InstallmentRepository.instance.create(
+          Installment(
+            name: 'Notebook',
+            totalAmount: 2400.0,
+            installmentAmount: 200.0,
+            totalInstallments: 12,
+            firstDueDate: DateTime(2026, 9, 25),
+            category: 'Outros',
+          ),
+        );
+
+        // Paga duas parcelas: cada pagamento gera uma transação derivada
+        // ("Notebook (1/12)" e "Notebook (2/12)") que aparece em Ganhos e
+        // gastos.
+        var item = (await BillRepository.instance.listPending()).single;
+        expect(await BillRepository.instance.markPendingPaid(item), isTrue);
+        item = (await BillRepository.instance.listPending()).single;
+        expect(await BillRepository.instance.markPendingPaid(item), isTrue);
+
+        final paidBefore = await db.query(
+          'transactions',
+          where: 'description LIKE ?',
+          whereArgs: ['Notebook (%'],
+        );
+        expect(paidBefore.length, 2,
+            reason: 'as parcelas pagas geram transações derivadas');
+
+        // Exclui o parcelamento em "Contas e vencimentos".
+        final pendingItem = (await BillRepository.instance.listPending()).single;
+        expect(pendingItem.source, BillSource.installment);
+        await BillRepository.instance.deletePending(pendingItem);
+
+        // O parcelamento some...
+        final installments = await db.query('installments');
+        expect(installments, isEmpty);
+
+        // ...e as transações derivadas também, para não permanecerem órfãs
+        // em "Ganhos e gastos".
+        final paidAfter = await db.query(
+          'transactions',
+          where: 'description LIKE ?',
+          whereArgs: ['Notebook (%'],
+        );
+        expect(paidAfter, isEmpty,
+            reason: 'excluir o parcelamento deve remover as parcelas pagas '
+                'para não deixar dado órfão em Ganhos e gastos');
+
+        // A listagem de Ganhos e gastos não deve mais exibir o parcelamento.
+        final transactions = await TransactionRepository.instance.list();
+        expect(
+          transactions.where((t) => t.description.startsWith('Notebook (')),
+          isEmpty,
+        );
+      },
+    );
+
+    test(
+      'excluir parcelamento não remove transações de outro parcelamento',
+      () async {
+        final db = await AppDatabase.instance.database;
+
+        await InstallmentRepository.instance.create(
+          Installment(
+            name: 'Notebook',
+            totalAmount: 2400.0,
+            installmentAmount: 200.0,
+            totalInstallments: 12,
+            firstDueDate: DateTime(2026, 9, 25),
+            category: 'Outros',
+          ),
+        );
+        await InstallmentRepository.instance.create(
+          Installment(
+            name: 'Geladeira',
+            totalAmount: 1200.0,
+            installmentAmount: 100.0,
+            totalInstallments: 12,
+            firstDueDate: DateTime(2026, 9, 26),
+            category: 'Casa',
+          ),
+        );
+
+        // Paga uma parcela de cada parcelamento.
+        final items = await BillRepository.instance.listPending();
+        final notebook = items.firstWhere((p) => p.bill.name == 'Notebook');
+        final geladeira = items.firstWhere((p) => p.bill.name == 'Geladeira');
+        expect(await BillRepository.instance.markPendingPaid(notebook), isTrue);
+        expect(await BillRepository.instance.markPendingPaid(geladeira), isTrue);
+
+        // Exclui apenas o Notebook.
+        final notebookPending = (await BillRepository.instance.listPending())
+            .firstWhere((p) => p.bill.name == 'Notebook');
+        await BillRepository.instance.deletePending(notebookPending);
+
+        // A transação da Geladeira deve permanecer intacta.
+        final geladeiraTx = await db.query(
+          'transactions',
+          where: 'description LIKE ?',
+          whereArgs: ['Geladeira (%'],
+        );
+        expect(geladeiraTx.length, 1,
+            reason: 'excluir um parcelamento não pode afetar outro');
+
+        final notebookTx = await db.query(
+          'transactions',
+          where: 'description LIKE ?',
+          whereArgs: ['Notebook (%'],
+        );
+        expect(notebookTx, isEmpty);
+      },
+    );
+
     test('pagar item de parcelamento avança a parcela', () async {
       await InstallmentRepository.instance.create(
         Installment(

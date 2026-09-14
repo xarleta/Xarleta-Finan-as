@@ -46,11 +46,10 @@ class _DashboardPageState extends State<DashboardPage>
   /// ao ser reaberto ou por pull-to-refresh.
   @override
   void onDataChanged() {
-    // A notificação pode chegar durante um build (ex.: após um pop); adiar
-    // para o próximo frame evita `setState` durante a construção.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _reload();
-    });
+    // O adiamento para o próximo frame (evitando `setState` durante o build) e
+    // a filtragem de telas não visíveis são feitos pelo
+    // `DataChangeListenerMixin`, então aqui basta recarregar.
+    _reload();
   }
 
   Future<void> _openCustomize() async {

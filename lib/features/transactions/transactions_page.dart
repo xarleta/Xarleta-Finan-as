@@ -44,11 +44,10 @@ class _TransactionsPageState extends State<TransactionsPage>
   @override
   void onDataChanged() {
     // Recarrega quando qualquer repositório sinaliza uma escrita (inclusive
-    // lançamentos criados/editados em outras telas). O post frame evita
-    // `setState` durante o build.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _refresh();
-    });
+    // lançamentos criados/editados em outras telas). O agendamento para o
+    // próximo frame e a filtragem de telas não visíveis são feitos pelo
+    // `DataChangeListenerMixin`, então aqui basta recarregar.
+    _refresh();
   }
 
   @override

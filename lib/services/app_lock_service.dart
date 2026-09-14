@@ -112,6 +112,16 @@ class _AppLockGateState extends State<AppLockGate>
   bool _biometricsEnabled = false;
   bool _biometricsAvailable = false;
   bool _unlocking = false;
+
+  /// `true` quando o usuário pediu explicitamente para usar o PIN (após a
+  /// biometria falhar/cancelar). Enquanto `false` e a biometria estiver
+  /// habilitada, a tela mostra apenas o botão de biometria e dispara a
+  /// autenticação automaticamente, sem exigir o PIN primeiro.
+  bool _usePinFallback = false;
+
+  /// Evita disparar a biometria automática mais de uma vez por bloqueio.
+  bool _biometricPrompted = false;
+
   final _pin = TextEditingController();
 
   @override
@@ -134,13 +144,28 @@ class _AppLockGateState extends State<AppLockGate>
     final hasUsableUnlock =
         pinEnabled || (biometricsEnabled && biometricsAvailable);
 
-    if (mounted) {
-      setState(() {
-        _pinEnabled = pinEnabled;
-        _biometricsEnabled = biometricsEnabled;
-        _biometricsAvailable = biometricsAvailable;
-        _locked = hasUsableUnlock;
-        _checking = false;
+    if (!mounted) return;
+
+    setState(() {
+      _pinEnabled = pinEnabled;
+      _biometricsEnabled = biometricsEnabled;
+      _biometricsAvailable = biometricsAvailable;
+      _locked = hasUsableUnlock;
+      _checking = false;
+      // Ao (re)bloquear, volta ao estado inicial: biometria primeiro (quando
+      // habilitada), PIN apenas como fallback explícito.
+      _usePinFallback = false;
+      _biometricPrompted = false;
+    });
+
+    // Cenário 3: PIN + biometria habilitados → pede a biometria diretamente,
+    // sem exigir o PIN antes. O disparo é feito após o primeiro frame para
+    // que o diálogo nativo apareça sobre a tela já montada. A flag
+    // `_biometricPrompted` impede disparos repetidos caso `_load` seja
+    // chamado mais de uma vez sem que o bloqueio tenha sido resolvido.
+    if (hasUsableUnlock && biometricsEnabled && biometricsAvailable) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _locked && !_biometricPrompted) _unlockBiometric();
       });
     }
   }
@@ -184,6 +209,7 @@ class _AppLockGateState extends State<AppLockGate>
 
   Future<void> _unlockBiometric() async {
     if (_unlocking) return;
+    _biometricPrompted = true;
     setState(() => _unlocking = true);
     try {
       final result = await AppLockService.instance.unlockWithBiometrics();
@@ -194,20 +220,48 @@ class _AppLockGateState extends State<AppLockGate>
           setState(() => _locked = false);
           break;
         case BiometricResult.failed:
-          _showMessage('Autenticação não concluída. Tente novamente.');
+          // Biometria cancelada/recusada: não insiste em loop. Libera o
+          // fallback para PIN (quando existir) e informa o usuário.
+          setState(() {
+            _usePinFallback = true;
+            _biometricPrompted = false;
+          });
+          _showMessage(
+            _pinEnabled
+                ? 'Autenticação não concluída. Use o PIN para continuar.'
+                : 'Autenticação não concluída. Tente novamente.',
+          );
           break;
         case BiometricResult.unavailable:
+          setState(() {
+            _biometricsAvailable = false;
+            _usePinFallback = true;
+            _biometricPrompted = false;
+          });
           _showMessage(
             'Biometria indisponível neste aparelho. Use o PIN para continuar.',
           );
-          setState(() => _biometricsAvailable = false);
           break;
         case BiometricResult.error:
-          _showMessage('Não foi possível usar a biometria. Tente novamente.');
+          setState(() {
+            _usePinFallback = true;
+            _biometricPrompted = false;
+          });
+          _showMessage(
+            _pinEnabled
+                ? 'Não foi possível usar a biometria. Use o PIN para continuar.'
+                : 'Não foi possível usar a biometria. Tente novamente.',
+          );
           break;
       }
     } catch (e) {
-      if (mounted) _showMessage('Não foi possível usar a biometria.');
+      if (mounted) {
+        setState(() {
+          _usePinFallback = true;
+          _biometricPrompted = false;
+        });
+        _showMessage('Não foi possível usar a biometria.');
+      }
       debugPrint('[AppLockGate] _unlockBiometric erro: $e');
     } finally {
       if (mounted) setState(() => _unlocking = false);
@@ -236,6 +290,12 @@ class _AppLockGateState extends State<AppLockGate>
 
     final showBiometrics = _biometricsEnabled && _biometricsAvailable;
 
+    // Cenário 3: biometria habilitada e disponível → mostra a opção de
+    // biometria em destaque (disparada automaticamente em `_load`). O campo de
+    // PIN só aparece quando o usuário pede o fallback ou quando não há
+    // biometria utilizável.
+    final showPinField = _pinEnabled && (!showBiometrics || _usePinFallback);
+
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -252,12 +312,23 @@ class _AppLockGateState extends State<AppLockGate>
                     style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   Text(
-                    _pinEnabled
+                    showPinField
                         ? 'Digite seu PIN para continuar'
                         : 'Confirme sua identidade para continuar',
                   ),
                   const SizedBox(height: 20),
-                  if (_pinEnabled) ...[
+                  if (showBiometrics) ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _unlocking ? null : _unlockBiometric,
+                        icon: const Icon(Icons.fingerprint),
+                        label: const Text('USAR BIOMETRIA'),
+                      ),
+                    ),
+                  ],
+                  if (showPinField) ...[
+                    if (showBiometrics) const SizedBox(height: 16),
                     TextField(
                       controller: _pin,
                       keyboardType: TextInputType.number,
@@ -278,12 +349,15 @@ class _AppLockGateState extends State<AppLockGate>
                       ),
                     ),
                   ],
-                  if (showBiometrics) ...[
+                  // Fallback explícito: com biometria em destaque, oferece a
+                  // opção de usar o PIN sem forçar um loop de biometria.
+                  if (showBiometrics && _pinEnabled && !_usePinFallback) ...[
                     const SizedBox(height: 8),
-                    TextButton.icon(
-                      onPressed: _unlocking ? null : _unlockBiometric,
-                      icon: const Icon(Icons.fingerprint),
-                      label: const Text('USAR BIOMETRIA'),
+                    TextButton(
+                      onPressed: _unlocking
+                          ? null
+                          : () => setState(() => _usePinFallback = true),
+                      child: const Text('USAR PIN'),
                     ),
                   ],
                 ],

@@ -27,11 +27,10 @@ class _WorkPageState extends State<WorkPage>
 
   @override
   void onDataChanged() {
-    // Recarrega as sessões quando qualquer repositório sinaliza uma escrita.
-    // O post frame evita `setState` durante o build.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) setState(() => _sessionsFuture = _load());
-    });
+    // Recarrega as sessões quando qualquer repositório sinaliza uma escrita. O
+    // agendamento para o próximo frame e a filtragem de telas não visíveis são
+    // feitos pelo `DataChangeListenerMixin`.
+    if (mounted) setState(() => _sessionsFuture = _load());
   }
 
   /// Exclui uma sessão de trabalho após confirmação do usuário.

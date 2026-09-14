@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'core/settings/settings_repository.dart';
+import 'core/state/app_route_observer.dart';
 import 'core/theme/app_theme.dart';
 import 'features/shell/app_shell.dart';
 import 'services/app_lock_service.dart';
@@ -55,6 +56,10 @@ class _XarletaFinancasAppState extends State<XarletaFinancasApp> {
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: _themeMode,
+      // Permite que as telas com `DataChangeListenerMixin` saibam quando
+      // voltam a ser a rota visível (ex.: após fechar um diálogo) e apliquem
+      // recargas que ficaram pendentes enquanto estavam cobertas.
+      navigatorObservers: [appRouteObserver],
       home: _loading
           ? const Scaffold(
               body: Center(

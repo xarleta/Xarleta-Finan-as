@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xarleta_financas/core/security/pin_repository.dart';
@@ -115,6 +116,125 @@ void main() {
 
         expect(await AppLockService.instance.isPinEnabled(), isFalse);
         expect(await AppLockService.instance.isLockEnabled(), isFalse);
+      },
+    );
+  });
+
+  group('AppLockGate — cenários de desbloqueio (BUG 5)', () {
+    /// Aguarda a resolução do `_load()` assíncrono do gate.
+    ///
+    /// Não é possível usar `pumpAndSettle` porque, enquanto `_checking` é
+    /// `true`, o gate exibe um `CircularProgressIndicator` — uma animação
+    /// contínua que nunca "assenta". Além disso, `_load()` aguarda `Future`s
+    /// reais de `SharedPreferences` (canal de plataforma mockado), que só
+    /// progridem dentro de `tester.runAsync`. Por isso: executa os `Future`s
+    /// reais em `runAsync` e depois bombeia um frame para aplicar o `setState`.
+    Future<void> settleGate(WidgetTester tester) async {
+      await tester.runAsync(() async {
+        // Dá tempo para os `Future`s de SharedPreferences/PinRepository
+        // concluírem no isolate real.
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pump();
+      await tester.pump();
+    }
+
+    testWidgets(
+      'cenário 1: sem PIN e sem biometria entra normalmente',
+      (tester) async {
+        SharedPreferences.setMockInitialValues({});
+
+        await tester.pumpWidget(
+          const MaterialApp(
+            home: AppLockGate(child: Text('conteúdo do app')),
+          ),
+        );
+        await settleGate(tester);
+
+        expect(find.text('conteúdo do app'), findsOneWidget);
+        expect(find.text('USAR BIOMETRIA'), findsNothing);
+        expect(find.text('DESBLOQUEAR'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'cenário 2: PIN habilitado e biometria desligada pede o PIN',
+      (tester) async {
+        SharedPreferences.setMockInitialValues({});
+        await PinRepository.instance.save('1234');
+
+        await tester.pumpWidget(
+          const MaterialApp(
+            home: AppLockGate(child: Text('conteúdo do app')),
+          ),
+        );
+        await settleGate(tester);
+
+        // Bloqueado: mostra o campo de PIN e não mostra biometria.
+        expect(find.text('conteúdo do app'), findsNothing);
+        expect(find.text('DESBLOQUEAR'), findsOneWidget);
+        expect(find.text('USAR BIOMETRIA'), findsNothing);
+
+        // PIN correto desbloqueia.
+        await tester.enterText(find.byType(TextField), '1234');
+        await tester.tap(find.text('DESBLOQUEAR'));
+        await settleGate(tester);
+
+        expect(find.text('conteúdo do app'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'cenário 2: PIN incorreto mantém o bloqueio',
+      (tester) async {
+        SharedPreferences.setMockInitialValues({});
+        await PinRepository.instance.save('1234');
+
+        await tester.pumpWidget(
+          const MaterialApp(
+            home: AppLockGate(child: Text('conteúdo do app')),
+          ),
+        );
+        await settleGate(tester);
+
+        await tester.enterText(find.byType(TextField), '0000');
+        await tester.tap(find.text('DESBLOQUEAR'));
+        await settleGate(tester);
+
+        expect(find.text('conteúdo do app'), findsNothing);
+        expect(find.text('DESBLOQUEAR'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'cenário 3: PIN + biometria habilitada mantém uma saída utilizável '
+      '(sem estado morto)',
+      (tester) async {
+        // Em ambiente de teste não há biometria real, então o cenário 3 puro
+        // (biometria disponível) não pode ser exercitado de ponta a ponta.
+        // O que é verificável aqui é o estado de fallback: com PIN habilitado,
+        // o usuário sempre tem uma saída e nunca fica preso.
+        SharedPreferences.setMockInitialValues({});
+        await PinRepository.instance.save('1234');
+        await AppLockService.instance.setBiometricsEnabled(true);
+
+        await tester.pumpWidget(
+          const MaterialApp(
+            home: AppLockGate(child: Text('conteúdo do app')),
+          ),
+        );
+        await settleGate(tester);
+
+        // Biometria indisponível no ambiente de teste → cai no PIN, que é a
+        // forma utilizável. O app não fica em estado morto.
+        expect(find.text('conteúdo do app'), findsNothing);
+        expect(find.text('DESBLOQUEAR'), findsOneWidget);
+
+        await tester.enterText(find.byType(TextField), '1234');
+        await tester.tap(find.text('DESBLOQUEAR'));
+        await settleGate(tester);
+
+        expect(find.text('conteúdo do app'), findsOneWidget);
       },
     );
   });

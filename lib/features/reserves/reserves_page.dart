@@ -30,11 +30,10 @@ class _ReservesPageState extends State<ReservesPage>
 
   @override
   void onDataChanged() {
-    // Recarrega as reservas quando qualquer repositório sinaliza uma escrita.
-    // O post frame evita `setState` durante o build.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _refresh();
-    });
+    // Recarrega as reservas quando qualquer repositório sinaliza uma escrita. O
+    // agendamento para o próximo frame e a filtragem de telas não visíveis são
+    // feitos pelo `DataChangeListenerMixin`.
+    _refresh();
   }
 
   Future<List<Map<String, Object?>>> load() async {

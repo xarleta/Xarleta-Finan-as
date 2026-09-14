@@ -39,11 +39,10 @@ class _BillsPageState extends State<BillsPage>
   @override
   void onDataChanged() {
     // Recarrega contas e contadores quando qualquer repositório sinaliza uma
-    // escrita (ex.: lançamento pago em outra tela). O post frame evita
-    // `setState` durante o build.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _refresh();
-    });
+    // escrita (ex.: lançamento pago em outra tela). O agendamento para o
+    // próximo frame e a filtragem de telas não visíveis são feitos pelo
+    // `DataChangeListenerMixin`, então aqui basta recarregar.
+    _refresh();
   }
 
   @override
