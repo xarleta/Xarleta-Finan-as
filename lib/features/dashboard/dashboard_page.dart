@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/state/data_change_listener.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../transactions/data/transaction_repository.dart';
@@ -11,7 +12,8 @@ class DashboardPage extends StatefulWidget {
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _DashboardPageState extends State<DashboardPage> {
+class _DashboardPageState extends State<DashboardPage>
+    with DataChangeListenerMixin {
   late Future<Map<String, double>> _summaryFuture;
 
   /// Personalização carregada do banco. Enquanto não carregada, usa o padrão
@@ -37,6 +39,18 @@ class _DashboardPageState extends State<DashboardPage> {
       _summaryFuture = future;
     });
     await future;
+  }
+
+  /// Recarrega o resumo quando qualquer dado financeiro muda em outra tela
+  /// (lançamentos, contas, parcelamentos). Sem isso, o dashboard só atualizava
+  /// ao ser reaberto ou por pull-to-refresh.
+  @override
+  void onDataChanged() {
+    // A notificação pode chegar durante um build (ex.: após um pop); adiar
+    // para o próximo frame evita `setState` durante a construção.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _reload();
+    });
   }
 
   Future<void> _openCustomize() async {

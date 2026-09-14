@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/state/data_change_listener.dart';
 import '../../core/utils/formatters.dart';
 import 'data/installment_repository.dart';
 import 'domain/installment_model.dart';
@@ -12,7 +13,8 @@ class InstallmentsPage extends StatefulWidget {
       _InstallmentsPageState();
 }
 
-class _InstallmentsPageState extends State<InstallmentsPage> {
+class _InstallmentsPageState extends State<InstallmentsPage>
+    with DataChangeListenerMixin {
   late Future<List<Installment>> _itemsFuture;
 
   @override
@@ -28,6 +30,15 @@ class _InstallmentsPageState extends State<InstallmentsPage> {
     if (!mounted) return;
     setState(() => _itemsFuture = InstallmentRepository.instance.list());
     await _itemsFuture;
+  }
+
+  @override
+  void onDataChanged() {
+    // Recarrega os parcelamentos quando qualquer repositório sinaliza uma
+    // escrita. O post frame evita `setState` durante o build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) refresh();
+    });
   }
 
   @override

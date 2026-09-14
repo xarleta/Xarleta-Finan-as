@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/state/data_change_listener.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import 'data/transaction_repository.dart';
@@ -13,7 +14,8 @@ class TransactionsPage extends StatefulWidget {
   State<TransactionsPage> createState() => _TransactionsPageState();
 }
 
-class _TransactionsPageState extends State<TransactionsPage> {
+class _TransactionsPageState extends State<TransactionsPage>
+    with DataChangeListenerMixin {
   String _query = '';
   TransactionType? _filter;
   late Future<List<FinanceTransaction>> _transactionsFuture;
@@ -31,8 +33,22 @@ class _TransactionsPageState extends State<TransactionsPage> {
       );
 
   Future<void> _refresh() async {
+    // Pode ser chamado após `await Navigator.push` ou após a exclusão de um
+    // lançamento. Se a tela já tiver sido descartada, o `setState` lançaria;
+    // a verificação mantém o comportamento quando a tela está viva.
+    if (!mounted) return;
     setState(() => _transactionsFuture = _load());
     await _transactionsFuture;
+  }
+
+  @override
+  void onDataChanged() {
+    // Recarrega quando qualquer repositório sinaliza uma escrita (inclusive
+    // lançamentos criados/editados em outras telas). O post frame evita
+    // `setState` durante o build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _refresh();
+    });
   }
 
   @override
@@ -160,7 +176,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
   }
 }
 
-class _TransactionTile extends StatelessWidget {
+class _TransactionTile extends StatefulWidget {
   final FinanceTransaction item;
   final Future<void> Function() onChanged;
 
@@ -168,6 +184,61 @@ class _TransactionTile extends StatelessWidget {
     required this.item,
     required this.onChanged,
   });
+
+  @override
+  State<_TransactionTile> createState() => _TransactionTileState();
+}
+
+class _TransactionTileState extends State<_TransactionTile> {
+  bool _deleting = false;
+
+  FinanceTransaction get item => widget.item;
+
+  /// Confirma e executa a exclusão do lançamento.
+  ///
+  /// A exclusão é um `DELETE` real na tabela `transactions` (ver
+  /// [TransactionRepository.delete]); após confirmar, a lista é recarregada
+  /// via [onChanged] para refletir a remoção imediatamente.
+  Future<void> _delete() async {
+    if (_deleting) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Excluir lançamento'),
+        content: Text(
+          'Deseja realmente excluir "${item.description}"?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _deleting = true);
+    try {
+      await TransactionRepository.instance.delete(item.id!);
+      await widget.onChanged();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Lançamento excluído'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _deleting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -186,12 +257,28 @@ class _TransactionTile extends StatelessWidget {
         subtitle: Text(
           '${item.category} • ${dateText(item.date)}',
         ),
-        trailing: Text(
-          '${income ? '+' : '-'} ${money(item.amount)}',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: color,
-          ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '${income ? '+' : '-'} ${money(item.amount)}',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Excluir',
+              onPressed: _deleting ? null : _delete,
+              icon: _deleting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.delete_outline),
+            ),
+          ],
         ),
         onTap: () async {
           final changed = await Navigator.push<bool>(
@@ -204,44 +291,10 @@ class _TransactionTile extends StatelessWidget {
           );
 
           if (changed == true) {
-            await onChanged();
+            await widget.onChanged();
           }
         },
-        onLongPress: () async {
-          final confirmed = await showDialog<bool>(
-            context: context,
-            builder: (dialogContext) => AlertDialog(
-              title: const Text('Excluir lançamento'),
-              content: Text(
-                'Deseja realmente excluir "${item.description}"?',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext, false),
-                  child: const Text('Cancelar'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(dialogContext, true),
-                  child: const Text('Excluir'),
-                ),
-              ],
-            ),
-          );
-
-          if (confirmed != true) return;
-
-          await TransactionRepository.instance.delete(item.id!);
-
-          await onChanged();
-
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Lançamento excluído'),
-              ),
-            );
-          }
-        },
+        onLongPress: _deleting ? null : _delete,
       ),
     );
   }

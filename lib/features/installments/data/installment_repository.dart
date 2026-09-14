@@ -1,4 +1,5 @@
 import '../../../core/database/app_database.dart';
+import '../../../core/state/data_change_notifier.dart';
 import '../domain/installment_model.dart';
 
 class InstallmentRepository {
@@ -13,18 +14,22 @@ class InstallmentRepository {
 
   Future<int> create(Installment item) async {
     final db = await AppDatabase.instance.database;
-    return db.insert('installments', item.toMap());
+    final id = await db.insert('installments', item.toMap());
+    DataChangeNotifier.instance.notifyChanged();
+    return id;
   }
 
   Future<void> update(Installment item) async {
     if (item.id == null) return;
     final db = await AppDatabase.instance.database;
     await db.update('installments', item.toMap(), where:'id=?', whereArgs:[item.id]);
+    DataChangeNotifier.instance.notifyChanged();
   }
 
   Future<void> delete(int id) async {
     final db = await AppDatabase.instance.database;
     await db.delete('installments', where:'id=?', whereArgs:[id]);
+    DataChangeNotifier.instance.notifyChanged();
   }
 
   /// Registra o pagamento da próxima parcela.
@@ -80,6 +85,7 @@ class InstallmentRepository {
       paidNow = true;
     });
 
+    if (paidNow) DataChangeNotifier.instance.notifyChanged();
     return paidNow;
   }
 }

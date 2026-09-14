@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/analytics/date_range.dart';
+import '../../core/state/data_change_listener.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import 'data/finance_analytics_repository.dart';
@@ -14,7 +15,8 @@ class AnalyticsPageV5 extends StatefulWidget {
   State<AnalyticsPageV5> createState() => _AnalyticsPageV5State();
 }
 
-class _AnalyticsPageV5State extends State<AnalyticsPageV5> {
+class _AnalyticsPageV5State extends State<AnalyticsPageV5>
+    with DataChangeListenerMixin {
   PeriodFilter _filter = PeriodFilter.month;
   DateTime? _customStart;
   DateTime? _customEnd;
@@ -36,7 +38,17 @@ class _AnalyticsPageV5State extends State<AnalyticsPageV5> {
       FinanceAnalyticsRepository.instance.load(_range);
 
   void _reload() {
+    if (!mounted) return;
     setState(() => _future = _load());
+  }
+
+  @override
+  void onDataChanged() {
+    // Recarrega as análises quando qualquer repositório sinaliza uma escrita.
+    // O post frame evita `setState` durante o build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _reload();
+    });
   }
 
   /// Retorna `true` quando um intervalo personalizado válido foi escolhido.

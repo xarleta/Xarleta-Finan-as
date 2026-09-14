@@ -1,4 +1,5 @@
 import '../../../core/database/app_database.dart';
+import '../../../core/state/data_change_notifier.dart';
 import '../domain/transaction_model.dart';
 
 class TransactionRepository {
@@ -7,7 +8,11 @@ class TransactionRepository {
 
   Future<int> create(FinanceTransaction item) async {
     final db = await AppDatabase.instance.database;
-    return db.insert('transactions', item.toMap());
+    final id = await db.insert('transactions', item.toMap());
+    // Avisa as telas (inclusive o dashboard) que os dados mudaram, para que
+    // recarreguem sem exigir sair e voltar da página.
+    DataChangeNotifier.instance.notifyChanged();
+    return id;
   }
 
   Future<List<FinanceTransaction>> list({
@@ -42,11 +47,13 @@ class TransactionRepository {
     final db = await AppDatabase.instance.database;
     final map = item.toMap()..remove('created_at');
     await db.update('transactions', map, where: 'id = ?', whereArgs: [item.id]);
+    DataChangeNotifier.instance.notifyChanged();
   }
 
   Future<void> delete(int id) async {
     final db = await AppDatabase.instance.database;
     await db.delete('transactions', where: 'id = ?', whereArgs: [id]);
+    DataChangeNotifier.instance.notifyChanged();
   }
 
   Future<Map<String, double>> summary() async {
