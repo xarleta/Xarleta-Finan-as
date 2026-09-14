@@ -3,7 +3,7 @@
          (BiometricPrompt) no Android 9 (API 28) e superiores. -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
     <application
-        android:label="xarleta_financas"
+        android:label="Xarleta Contador"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

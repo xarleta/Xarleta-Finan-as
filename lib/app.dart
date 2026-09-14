@@ -50,7 +50,7 @@ class _XarletaFinancasAppState extends State<XarletaFinancasApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Xarleta Finanças',
+      title: 'Xarleta Contador',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,

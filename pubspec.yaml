@@ -37,6 +37,29 @@ dev_dependencies:
     sdk: flutter
 
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.3
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/icon/
+
+# Geração dos ícones do aplicativo a partir da imagem oficial fornecida
+# (assets/icon/app_icon.png, 1024x1024). O ícone adaptativo do Android usa a
+# mesma imagem como frente e um fundo sólido escuro, preservando o rosto
+# centralizado e evitando cortes em máscaras circulares/arredondadas.
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/app_icon.png"
+  adaptive_icon_background: "#1A1A1A"
+  adaptive_icon_foreground: "assets/icon/app_icon.png"
+  windows:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+    icon_size: 256
+  web:
+    generate: false
+  macos:
+    generate: false
